@@ -1,0 +1,93 @@
+# QUBIC Monitoring
+
+Local prototype of the new QUBIC cryogenic monitoring system.
+
+## Prototype status
+
+- incremental ingestion from ASCII files into a local SQLite database;
+- detection of replaced or truncated source files;
+- per-channel freshness and data-quality tracking;
+- compact snapshots for the web interface;
+- lightweight status polling: the multi-megabyte snapshot is fetched only when its generation timestamp changes;
+- compact binary-like point tuples in JSON and isolated tooltip updates, avoiding full-chart rerenders while the mouse moves;
+- 30-second binary aggregates instead of repeatedly parsing full ASCII histories;
+- interactive views for all instrument temperatures, cryostat pressure,
+  normalized Touch/1 K correlation, both compressors and site weather;
+- global observatory banner, analysis-mode navigation and central housekeeping selector;
+- channel selection by human label and original source-file name;
+- mouse-drawn rectangular zoom on both axes, logarithmic scale and 1 h, 2 h, 48 h, 7 d, 30 d and full-history windows;
+- zoom-aware time labels and subtle timezone-aware vertical markers at local day boundaries;
+- logarithmic bounds derived from the positive data currently visible, without an arbitrary low floor;
+- selectable weather channels, Open-Meteo forecast overlays and an optional local 7-day RMS envelope centred on each current curve;
+- polar wind view combining the current vector, time-faded recent samples and selectable full-cooldown, 24-hour or 7-day density maps;
+- selectable UTC, Paris/Roma and Argentina display times, shown explicitly on axes and tooltips;
+- three on-demand site webcams, requested only while the webcam view is open, with fullscreen, still-image capture and bandwidth-limited video capture;
+- first automatic markers at 260 K and 1.2 K;
+- preparatory views for cold-phase and cooldown comparisons;
+- English by default, with French, Argentine Spanish and Italian available.
+
+The local database lives in `.local/` and is not versioned. ASCII source files
+inside cooldown directories are never modified.
+
+## Refresh data
+
+```bash
+npm run data:sync
+npm run data:refresh
+```
+
+Or run both steps with:
+
+```bash
+npm run data:update
+```
+
+For normal local operation, start the dashboard and the automatic collector
+together:
+
+```bash
+npm run monitor
+```
+
+The collector refreshes continuously (120 seconds by default) and the browser
+checks for a new snapshot every 30 seconds. Set `QUBIC_REFRESH_SECONDS` to tune
+the collector interval.
+
+The sync command uses the `qubicdl` SSH alias and downloads the requested
+`AVS47`, `TEMPERATURE`, pressure, compressor and weather streams. Webcam
+credentials stay in the ignored `.env.local` file and are never sent to the
+browser or included in build output. `.env.example` documents the required
+variables for another machine.
+
+The default current source is `June2026`. The first run imports existing lines
+into 30-second aggregates; later runs resume at the last known byte position in
+each file. Channels announced by the catalogue but absent on site remain
+visible with a `missing` status.
+
+Another cooldown can be selected without editing code:
+
+```bash
+QUBIC_COOLDOWN_DIR=August2026 QUBIC_COOLDOWN_LABEL="August 2026" npm run data:refresh
+```
+
+## Run the local interface
+
+```bash
+npm run dev
+```
+
+Then open `http://localhost:3000/`.
+
+## Verify the build
+
+```bash
+npm run build
+node --test tests/rendered-html.test.mjs
+```
+
+## Transitional architecture
+
+The prototype uses SQLite so that it runs immediately on the Mac without an
+additional service. The collector, channel catalogue and interface are kept
+separate so SQLite can later be replaced by PostgreSQL with TimescaleDB for the
+Linux deployment at APC.
