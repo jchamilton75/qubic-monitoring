@@ -164,6 +164,7 @@ function createHoverPointerStore(): HoverPointerStore {
 type View = "monitoring" | "cycles" | "compare" | "sources" | "webcams";
 type HousekeepingView = "temperatures" | "pressure" | "touch" | "compressors" | "weather";
 type TimeRange = "1h" | "2h" | "48h" | "7d" | "30d" | "all";
+type DisplayStatistic = "value" | "min" | "max";
 type Language = "en" | "fr" | "es" | "it";
 type DisplayTimeZone = "UTC" | "Europe/Paris" | "America/Argentina/Buenos_Aires";
 
@@ -238,6 +239,10 @@ const messages: Record<Language, Record<string, string>> = {
     yAxis: "Y-axis",
     yMinimum: "Minimum",
     yMaximum: "Maximum",
+    displayMode: "Displayed statistic",
+    displayValue: "Value",
+    displayMinimum: "Minimum",
+    displayMaximum: "Maximum",
     autoScale: "Auto",
     logScale: "Log scale",
     visibleChannels: "Visible channels",
@@ -422,7 +427,7 @@ const messages: Record<Language, Record<string, string>> = {
     warningTitle: "Flux de télémétrie partiel", warningBody: "{count} source(s) sans donnée récente — les courbes ne sont jamais prolongées au-delà de leur dernière mesure.",
     mainTemperatures: "Températures principales", cryogenicEvolution: "Évolution cryogénique", chartCopy: "Agrégats par canal. Chaque source conserve sa propre chronologie et fraîcheur.",
     temperaturesCopy: "Tous les canaux de température de l’instrument. Sélectionnez-les par leur nom humain et leur identifiant de fichier.", pressureTitle: "Pression du cryostat", pressureCopy: "Vue logarithmique dédiée à la pression du vide.", touchTitle: "Signal Touch aligné sur l’étage 1 K", touchCopy: "Le Touch utilise le maximum de chaque paquet de rééchantillonnage puis une normalisation logarithmique afin de conserver les ouvertures brèves du switch thermique mécanique. Les deux signaux sont normalisés indépendamment et le graphique s’arrête 24 heures après la fin du refroidissement principal.", touchBucketMaximum: "maximum du paquet", fridgeBucketMaximum: "maximum sur 10 min", mhsOperations: "Ouvertures/fermetures MHS détectées", mhsOperationsCopy: "Détection automatique pendant le refroidissement principal. Sélectionnez une manœuvre pour l’examiner.", mhsOperation: "MHS {count}", mhsPeak: "pic {value}", backToTouchOverview: "Revenir à la vue Touch complète", normalizedSignal: "Signal normalisé", compressorTitle: "Compresseurs des tubes pulsés", compressorCopy: "Températures hélium, entrée et sortie, pression d’entrée et état des deux compresseurs.", weatherTitle: "Météo à Alto Chorrillos", weatherCopy: "Conditions extérieures et intérieures, pression atmosphérique, vitesse et direction du vent.", selectAll: "Tout sélectionner", clearSelection: "Effacer", online: "En ligne", offline: "Hors ligne",
-    timeWindow: "Fenêtre temporelle", boxZoom: "Zoom rectangle", dragToZoom: "Tracez un rectangle sur la courbe pour zoomer sur les deux axes", resetZoom: "Réinitialiser le zoom", yAxis: "Axe Y", yMinimum: "Minimum", yMaximum: "Maximum", autoScale: "Auto", logScale: "Échelle log", visibleChannels: "Canaux visibles", emptyChart: "Aucun canal visible dans cette période.", chartHint: "Utilisez la bande inférieure pour zoomer et vous déplacer dans le temps.",
+    timeWindow: "Fenêtre temporelle", boxZoom: "Zoom rectangle", dragToZoom: "Tracez un rectangle sur la courbe pour zoomer sur les deux axes", resetZoom: "Réinitialiser le zoom", yAxis: "Axe Y", yMinimum: "Minimum", yMaximum: "Maximum", displayMode: "Statistique affichée", displayValue: "Valeur", displayMinimum: "Minimum", displayMaximum: "Maximum", autoScale: "Auto", logScale: "Échelle log", visibleChannels: "Canaux visibles", emptyChart: "Aucun canal visible dans cette période.", chartHint: "Utilisez la bande inférieure pour zoomer et vous déplacer dans le temps.",
     forecast: "Prévisions", forecastUnavailable: "Prévisions temporairement indisponibles", forecastSource: "Prévisions Open-Meteo · coordonnées QUBIC et altitude 4 869 m", diurnalReference: "Enveloppe RMS sur 7 jours", diurnalReferenceCopy: "Enveloppe transparente ± RMS centrée sur la courbe actuelle et estimée sur les 7 jours précédents", expectedPattern: "Enveloppe RMS sur 7 jours", windRoseTitle: "Vitesse et direction d’arrivée du vent", windRoseCopy: "La carte de couleurs utilise la période de densité choisie ; les mesures récentes s’estompent avec leur âge sur la fenêtre temporelle affichée.", windFrom: "Vent venant de {direction}", fullCooldownDensity: "Cooldown complet", last24hDensity: "Dernières 24 h", last7dDensity: "7 derniers jours",
     automaticMarkers: "Repères automatiques", cryogenicTimeline: "Chronologie cryogénique", timelinePhaseData: "Début des données", timelinePhaseDataCopy: "Premier échantillon valide du cooldown courant", timelinePhasePumping: "Pompage", timelinePhasePumpingCopy: "Pression du cryostat sous 300 mbar", timelinePhaseMain: "Refroidissement principal", timelinePhaseMainCopy: "Du démarrage des PTC aux deux seconds étages sous 4,5 K", timelinePhaseSubK: "Cyclages sub-K", timelinePhaseSubKCopy: "Premiers cyclages des réfrigérateurs 300 mK et 1 K", review: "Réviser", editingSoon: "Édition ajoutée prochainement", toDetect: "À détecter", candidateDetection: "Détection candidate", insufficientData: "Données insuffisantes",
     subKSequence: "Séquence sub-K", coldTitle: "La phase froide devient un objet d’analyse dédié.", coldCopy: "Elle démarre après confirmation de la stabilité de l’étage 4 K et contient les cyclages 1 K et 300 mK détectés via les chauffages, MHS et températures.", latest1K: "Dernier signal 1 K",
@@ -446,7 +451,7 @@ const messages: Record<Language, Record<string, string>> = {
     "range.all": "Todo", "status.fresh": "Actualizado", "status.delayed": "Demorado", "status.stale": "Desactualizado", "status.missing": "Ausente",
     notAvailable: "No disponible", neverReceived: "nunca recibido", ageMinutes: "hace {count} min", ageHours: "hace {count} h", ageDays: "hace {count} d",
     loading: "Leyendo el instrumento…", loadError: "Los datos locales todavía no están disponibles.", loadErrorHelp: "Actualizá el importador y volvé a cargar esta página.", warningTitle: "Flujo de telemetría parcial", warningBody: "{count} fuente(s) sin datos recientes — las curvas nunca se extienden más allá de su última medición.",
-    mainTemperatures: "Temperaturas principales", cryogenicEvolution: "Evolución criogénica", chartCopy: "Agregados por canal. Cada fuente conserva su propia cronología y frescura.", timeWindow: "Ventana temporal", boxZoom: "Zoom rectangular", dragToZoom: "Arrastrá un rectángulo sobre la curva para ampliar ambos ejes", resetZoom: "Restablecer zoom", yAxis: "Eje Y", yMinimum: "Mínimo", yMaximum: "Máximo", autoScale: "Auto", logScale: "Escala log", visibleChannels: "Canales visibles", emptyChart: "No hay canales visibles en este período.", chartHint: "Usá la banda inferior para ampliar y recorrer el tiempo.",
+    mainTemperatures: "Temperaturas principales", cryogenicEvolution: "Evolución criogénica", chartCopy: "Agregados por canal. Cada fuente conserva su propia cronología y frescura.", timeWindow: "Ventana temporal", boxZoom: "Zoom rectangular", dragToZoom: "Arrastrá un rectángulo sobre la curva para ampliar ambos ejes", resetZoom: "Restablecer zoom", yAxis: "Eje Y", yMinimum: "Mínimo", yMaximum: "Máximo", displayMode: "Estadística mostrada", displayValue: "Valor", displayMinimum: "Mínimo", displayMaximum: "Máximo", autoScale: "Auto", logScale: "Escala log", visibleChannels: "Canales visibles", emptyChart: "No hay canales visibles en este período.", chartHint: "Usá la banda inferior para ampliar y recorrer el tiempo.",
     forecast: "Pronóstico", forecastUnavailable: "Pronóstico temporalmente no disponible", forecastSource: "Pronóstico Open-Meteo · coordenadas QUBIC y altitud 4.869 m", diurnalReference: "Envolvente RMS de 7 días", diurnalReferenceCopy: "Envolvente transparente ± RMS centrada en la curva actual y estimada con los 7 días anteriores", expectedPattern: "Envolvente RMS de 7 días", windRoseTitle: "Velocidad y dirección de llegada del viento", windRoseCopy: "El mapa de colores usa el período de densidad elegido; las muestras recientes se desvanecen con la antigüedad en la ventana temporal mostrada.", windFrom: "Viento desde {direction}", fullCooldownDensity: "Cooldown completo", last24hDensity: "Últimas 24 h", last7dDensity: "Últimos 7 días",
     temperaturesCopy: "Todos los canales de temperatura del instrumento, identificados por nombre humano y archivo fuente.", pressureTitle: "Presión del criostato", pressureCopy: "Vista logarítmica dedicada a la presión de vacío.", touchTitle: "Señal Touch alineada con la etapa de 1 K", touchCopy: "Touch usa el máximo de cada bloque de remuestreo y una normalización logarítmica para conservar las aperturas breves del interruptor térmico mecánico. Ambas señales se normalizan por separado y el gráfico termina 24 horas después del enfriamiento principal.", touchBucketMaximum: "máximo del bloque", fridgeBucketMaximum: "máximo en 10 min", mhsOperations: "Aperturas/cierres MHS detectados", mhsOperationsCopy: "Detección automática durante el enfriamiento principal. Seleccioná una maniobra para examinarla.", mhsOperation: "MHS {count}", mhsPeak: "pico {value}", backToTouchOverview: "Volver a la vista Touch completa", normalizedSignal: "Señal normalizada", compressorTitle: "Compresores de los tubos de pulso", compressorCopy: "Temperaturas, presión de entrada y estado de los dos compresores.", weatherTitle: "Tiempo en Alto Chorrillos", weatherCopy: "Condiciones exteriores e interiores, presión atmosférica, velocidad y dirección del viento.", selectAll: "Seleccionar todo", clearSelection: "Limpiar", online: "En línea", offline: "Fuera de línea",
     automaticMarkers: "Marcadores automáticos", cryogenicTimeline: "Cronología criogénica", timelinePhaseData: "Inicio de los datos", timelinePhaseDataCopy: "Primera muestra válida del cooldown actual", timelinePhasePumping: "Bombeo", timelinePhasePumpingCopy: "Presión del criostato por debajo de 300 mbar", timelinePhaseMain: "Enfriamiento principal", timelinePhaseMainCopy: "Desde el arranque de los PTC hasta las dos segundas etapas por debajo de 4,5 K", timelinePhaseSubK: "Ciclos sub-K", timelinePhaseSubKCopy: "Primeros ciclos de los refrigeradores de 300 mK y 1 K", review: "Revisar", editingSoon: "La edición se agregará próximamente", toDetect: "Por detectar", candidateDetection: "Detección candidata", insufficientData: "Datos insuficientes",
@@ -470,7 +475,7 @@ const messages: Record<Language, Record<string, string>> = {
     "range.all": "Tutto", "status.fresh": "Aggiornato", "status.delayed": "In ritardo", "status.stale": "Obsoleto", "status.missing": "Assente",
     notAvailable: "Non disponibile", neverReceived: "mai ricevuto", ageMinutes: "{count} min fa", ageHours: "{count} h fa", ageDays: "{count} g fa",
     loading: "Lettura dello strumento…", loadError: "I dati locali non sono ancora disponibili.", loadErrorHelp: "Aggiorna l’importatore e ricarica questa pagina.", warningTitle: "Flusso di telemetria parziale", warningBody: "{count} sorgente/i senza dati recenti — le curve non vengono mai estese oltre l’ultima misura.",
-    mainTemperatures: "Temperature principali", cryogenicEvolution: "Evoluzione criogenica", chartCopy: "Aggregati per canale. Ogni sorgente mantiene la propria cronologia e freschezza.", timeWindow: "Intervallo temporale", boxZoom: "Zoom rettangolare", dragToZoom: "Trascina un rettangolo sulla curva per ingrandire entrambi gli assi", resetZoom: "Reimposta zoom", yAxis: "Asse Y", yMinimum: "Minimo", yMaximum: "Massimo", autoScale: "Auto", logScale: "Scala log", visibleChannels: "Canali visibili", emptyChart: "Nessun canale visibile in questo periodo.", chartHint: "Usa la fascia inferiore per ingrandire e spostarti nel tempo.",
+    mainTemperatures: "Temperature principali", cryogenicEvolution: "Evoluzione criogenica", chartCopy: "Aggregati per canale. Ogni sorgente mantiene la propria cronologia e freschezza.", timeWindow: "Intervallo temporale", boxZoom: "Zoom rettangolare", dragToZoom: "Trascina un rettangolo sulla curva per ingrandire entrambi gli assi", resetZoom: "Reimposta zoom", yAxis: "Asse Y", yMinimum: "Minimo", yMaximum: "Massimo", displayMode: "Statistica visualizzata", displayValue: "Valore", displayMinimum: "Minimo", displayMaximum: "Massimo", autoScale: "Auto", logScale: "Scala log", visibleChannels: "Canali visibili", emptyChart: "Nessun canale visibile in questo periodo.", chartHint: "Usa la fascia inferiore per ingrandire e spostarti nel tempo.",
     forecast: "Previsioni", forecastUnavailable: "Previsioni temporaneamente non disponibili", forecastSource: "Previsioni Open-Meteo · coordinate QUBIC e quota 4.869 m", diurnalReference: "Inviluppo RMS di 7 giorni", diurnalReferenceCopy: "Inviluppo trasparente ± RMS centrato sulla curva corrente e stimato sui 7 giorni precedenti", expectedPattern: "Inviluppo RMS di 7 giorni", windRoseTitle: "Velocità e direzione di arrivo del vento", windRoseCopy: "La mappa dei colori usa il periodo di densità scelto; i campioni recenti sfumano con l’età nella finestra temporale visualizzata.", windFrom: "Vento da {direction}", fullCooldownDensity: "Cooldown completo", last24hDensity: "Ultime 24 h", last7dDensity: "Ultimi 7 giorni",
     temperaturesCopy: "Tutti i canali di temperatura dello strumento, con nome umano e file sorgente.", pressureTitle: "Pressione del criostato", pressureCopy: "Vista logaritmica dedicata alla pressione del vuoto.", touchTitle: "Segnale Touch allineato allo stadio 1 K", touchCopy: "Touch usa il massimo di ogni intervallo di ricampionamento e una normalizzazione logaritmica per conservare le brevi aperture dell’interruttore termico meccanico. I due segnali sono normalizzati separatamente e il grafico termina 24 ore dopo la fine del raffreddamento principale.", touchBucketMaximum: "massimo dell’intervallo", fridgeBucketMaximum: "massimo su 10 min", mhsOperations: "Aperture/chiusure MHS rilevate", mhsOperationsCopy: "Rilevamento automatico durante il raffreddamento principale. Seleziona una manovra per esaminarla.", mhsOperation: "MHS {count}", mhsPeak: "picco {value}", backToTouchOverview: "Torna alla vista Touch completa", normalizedSignal: "Segnale normalizzato", compressorTitle: "Compressori dei pulse tube", compressorCopy: "Temperature, pressione d’ingresso e stato dei due compressori.", weatherTitle: "Meteo ad Alto Chorrillos", weatherCopy: "Condizioni esterne e interne, pressione atmosferica, velocità e direzione del vento.", selectAll: "Seleziona tutto", clearSelection: "Cancella", online: "Online", offline: "Offline",
     automaticMarkers: "Riferimenti automatici", cryogenicTimeline: "Cronologia criogenica", timelinePhaseData: "Inizio dei dati", timelinePhaseDataCopy: "Primo campione valido del cooldown corrente", timelinePhasePumping: "Pompaggio", timelinePhasePumpingCopy: "Pressione del criostato sotto 300 mbar", timelinePhaseMain: "Raffreddamento principale", timelinePhaseMainCopy: "Dall’avvio dei PTC ai due secondi stadi sotto 4,5 K", timelinePhaseSubK: "Cicli sub-K", timelinePhaseSubKCopy: "Primi cicli dei refrigeratori da 300 mK e 1 K", review: "Rivedi", editingSoon: "La modifica sarà aggiunta prossimamente", toDetect: "Da rilevare", candidateDetection: "Rilevamento candidato", insufficientData: "Dati insufficienti",
@@ -821,6 +826,16 @@ function channelName(channel: Channel, language: Language) {
   return translated === key ? channel.label : translated;
 }
 
+function channelPointValue(point: ChannelPoint, statistic: DisplayStatistic) {
+  if (statistic === "min") return point[2] ?? point[1];
+  if (statistic === "max") return point[3] ?? point[1];
+  return point[1];
+}
+
+function statisticLabel(statistic: DisplayStatistic, language: Language) {
+  return translate(language, statistic === "min" ? "displayMinimum" : statistic === "max" ? "displayMaximum" : "displayValue");
+}
+
 function mergeChartData(
   channels: Channel[],
   selectedIds: string[],
@@ -829,6 +844,7 @@ function mergeChartData(
   timelineStartMs?: number,
   zeroBeforeFirstData = false,
   maxPointsPerChannel = 2400,
+  statistic: DisplayStatistic = "value",
 ) {
   const duration = timeRangeDurations[range];
   const minimum = duration ? latestGlobalMs - duration : Number.NEGATIVE_INFINITY;
@@ -859,8 +875,8 @@ function mergeChartData(
       let minimumPoint = bucket[0];
       let maximumPoint = bucket[0];
       for (const point of bucket) {
-        if ((point[2] ?? point[1]) < (minimumPoint[2] ?? minimumPoint[1])) minimumPoint = point;
-        if ((point[3] ?? point[1]) > (maximumPoint[3] ?? maximumPoint[1])) maximumPoint = point;
+        if (channelPointValue(point, statistic) < channelPointValue(minimumPoint, statistic)) minimumPoint = point;
+        if (channelPointValue(point, statistic) > channelPointValue(maximumPoint, statistic)) maximumPoint = point;
       }
       // Keeping the first and last point makes the decimated line continuous;
       // min/max points preserve narrow fridge and Touch events.
@@ -883,7 +899,7 @@ function mergeChartData(
     }
     for (const point of points) {
       const row = rows.get(point[0]) ?? { timeMs: point[0] };
-      row[channel.id] = point[1];
+      row[channel.id] = channelPointValue(point, statistic);
       rows.set(point[0], row);
     }
   }
@@ -904,8 +920,9 @@ function cachedMergeChartData(
   timelineStartMs: number | undefined,
   zeroBeforeFirstData: boolean,
   revision: string,
+  statistic: DisplayStatistic,
 ) {
-  const key = `${revision}|${range}|${selectedIds.join(",")}|${timelineStartMs ?? ""}|${zeroBeforeFirstData ? 1 : 0}`;
+  const key = `${revision}|${range}|${selectedIds.join(",")}|${timelineStartMs ?? ""}|${zeroBeforeFirstData ? 1 : 0}|${statistic}`;
   const cached = chartDataCache.get(key);
   if (cached) return cached;
   const next = mergeChartData(
@@ -916,6 +933,7 @@ function cachedMergeChartData(
     timelineStartMs,
     zeroBeforeFirstData,
     chartPointBudgets[range],
+    statistic,
   );
   chartDataCache.set(key, next);
   if (chartDataCache.size > 32) {
@@ -997,6 +1015,19 @@ function RangeSelector({ range, setRange, language }: { range: TimeRange; setRan
       {rangeIds.map((rangeId) => (
         <button type="button" key={rangeId} className={range === rangeId ? "active" : ""} onClick={() => setRange(rangeId)}>
           {formatRangeLabel(rangeId, language)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function DisplayStatisticSelector({ statistic, setStatistic, language }: { statistic: DisplayStatistic; setStatistic: (statistic: DisplayStatistic) => void; language: Language }) {
+  const options: DisplayStatistic[] = ["value", "min", "max"];
+  return (
+    <div className="segmented" aria-label={translate(language, "displayMode")}>
+      {options.map((option) => (
+        <button type="button" key={option} className={statistic === option ? "active" : ""} onClick={() => setStatistic(option)}>
+          {statisticLabel(option, language)}
         </button>
       ))}
     </div>
@@ -1219,6 +1250,7 @@ function TelemetryChart({
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>(defaultIds);
   const [range, setRange] = useState<TimeRange>(initialRange);
+  const [displayStatistic, setDisplayStatistic] = useState<DisplayStatistic>("value");
   const [logScale, setLogScale] = useState(initialLogScale);
   const [zoomMode, setZoomMode] = useState(false);
   const [zoom, setZoom] = useState<ZoomDomain | null>(null);
@@ -1229,8 +1261,8 @@ function TelemetryChart({
     [channels, latestGlobalMs],
   );
   const data = useMemo(
-    () => cachedMergeChartData(channels, selectedIds, range, latestGlobalMs, timelineStartMs, zeroBeforeFirstData, dataRevision),
-    [channels, dataRevision, latestGlobalMs, range, selectedIds, timelineStartMs, zeroBeforeFirstData],
+    () => cachedMergeChartData(channels, selectedIds, range, latestGlobalMs, timelineStartMs, zeroBeforeFirstData, dataRevision, displayStatistic),
+    [channels, dataRevision, displayStatistic, latestGlobalMs, range, selectedIds, timelineStartMs, zeroBeforeFirstData],
   );
   const units = Array.from(new Set(channels.filter((channel) => selectedIds.includes(channel.id)).map((channel) => channel.unit)));
   const axisUnit = units.length === 1 ? ` ${units[0]}` : "";
@@ -1249,11 +1281,12 @@ function TelemetryChart({
   const fullSpanMs = Math.max(1, (data.at(-1)?.timeMs ?? 1) - (data[0]?.timeMs ?? 0));
   const hoverCurves = useMemo(() => selectedIds.flatMap((id) => {
     const channel = channels.find((item) => item.id === id);
-    const label = channel?.aggregation === "bucket_max_10m"
-      ? `${channelName(channel, language)} · ${translate(language, "fridgeBucketMaximum")}`
-      : channel ? channelName(channel, language) : "";
-    return channel ? [makeHoverCurve(data, id, label, channel.unit, channel.color)] : [];
-  }), [channels, data, language, selectedIds]);
+    if (!channel) return [];
+    const aggregateLabel = channel.aggregation === "bucket_max_10m" ? ` · ${translate(language, "fridgeBucketMaximum")}` : "";
+    const selectedStatisticLabel = displayStatistic === "value" ? "" : ` · ${statisticLabel(displayStatistic, language)}`;
+    const label = `${channelName(channel, language)}${aggregateLabel}${selectedStatisticLabel}`;
+    return [makeHoverCurve(data, id, label, channel.unit, channel.color)];
+  }), [channels, data, displayStatistic, language, selectedIds]);
 
   function toggleChannel(id: string) {
     setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
@@ -1313,6 +1346,7 @@ function TelemetryChart({
       <div className="plot-control-bar">
         <div className="chart-controls">
           <RangeSelector range={range} setRange={(nextRange) => { setRange(nextRange); setZoom(null); setBrushRange(null); }} language={language} />
+          <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); setZoom(null); setBrushRange(null); }} language={language} />
           <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom)} reset={() => setZoom(null)} language={language} />
           {allowLogScale ? (
             <button type="button" className={`scale-toggle ${logScale ? "active" : ""}`} onClick={() => { setLogScale((value) => !value); setZoom(null); }} aria-pressed={logScale}>
@@ -1345,6 +1379,7 @@ function PressurePanel({ snapshot, language, timeZone }: { snapshot: MonitoringS
 
 function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnapshot; language: Language; timeZone: DisplayTimeZone }) {
   const [range, setRange] = useState<TimeRange>("all");
+  const [displayStatistic, setDisplayStatistic] = useState<DisplayStatistic>("value");
   const [zoomMode, setZoomMode] = useState(false);
   const [zoom, setZoom] = useState<ZoomDomain | null>(null);
   const [brushRange, setBrushRange] = useState<{ startIndex: number; endIndex: number } | null>(null);
@@ -1363,8 +1398,11 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
     const rows = new Map<number, ChartDatum>();
     for (const channel of channels) {
       const points = channel.points
-        .filter((point) => point[0] >= minimum && point[0] <= maximum && Number.isFinite(point[1]) && (channel.id !== "avs47_1_ch0" || point[1] > 0))
-        .map((point) => [point[0], channel.id === "avs47_1_ch0" ? Math.log10(point[1]) : point[1]] as ChannelPoint);
+        .flatMap((point) => {
+          const value = channelPointValue(point, displayStatistic);
+          if (point[0] < minimum || point[0] > maximum || !Number.isFinite(value) || (channel.id === "avs47_1_ch0" && value <= 0)) return [];
+          return [[point[0], channel.id === "avs47_1_ch0" ? Math.log10(value) : value] as ChannelPoint];
+        });
       const values = points.map((point) => point[1]);
       const low = Math.min(...values);
       const high = Math.max(...values);
@@ -1376,7 +1414,7 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
       }
     }
     return [...rows.values()].sort((a, b) => a.timeMs - b.timeMs);
-  }, [activeZoom, channels, range, touchDisplayEndMs]);
+  }, [activeZoom, channels, displayStatistic, range, touchDisplayEndMs]);
   const brushedData = brushRange ? data.slice(brushRange.startIndex, brushRange.endIndex + 1) : data;
   const currentXDomain: [number, number] = activeZoom
     ? [activeZoom.xMin, activeZoom.xMax]
@@ -1387,10 +1425,10 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
   const hoverCurves = useMemo(() => channels.map((channel) => makeHoverCurve(
     data,
     channel.id,
-    channel.id === "avs47_1_ch0" ? `${channelName(channel, language)} · ${translate(language, "touchBucketMaximum")}` : channelName(channel, language),
+    `${channelName(channel, language)} · ${displayStatistic === "value" && channel.id === "avs47_1_ch0" ? translate(language, "touchBucketMaximum") : statisticLabel(displayStatistic, language)}`,
     "",
     channel.color,
-  )), [channels, data, language]);
+  )), [channels, data, displayStatistic, language]);
 
   function focusMhsOperation(event: TouchEvent) {
     const halfWindow = Math.max(6 * 3_600_000, (event.endMs - event.startMs) * 8);
@@ -1412,7 +1450,7 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
         <div><p className="eyebrow">{translate(language, "eyebrow.touch")}</p><h2>{translate(language, "touchTitle")}</h2><p className="panel-copy">{translate(language, "touchCopy")}</p></div>
       </div>
       <div className="touch-legend">
-        {channels.map((channel) => <div key={channel.id}><span style={{ background: channel.color }} /><strong>{channel.id === "avs47_1_ch0" ? `${channelName(channel, language)} · ${translate(language, "touchBucketMaximum")}` : channelName(channel, language)}</strong><small>{channel.sourceName}</small><StatusDot status={channel.status} /></div>)}
+        {channels.map((channel) => <div key={channel.id}><span style={{ background: channel.color }} /><strong>{channelName(channel, language)} · {displayStatistic === "value" && channel.id === "avs47_1_ch0" ? translate(language, "touchBucketMaximum") : statisticLabel(displayStatistic, language)}</strong><small>{channel.sourceName}</small><StatusDot status={channel.status} /></div>)}
       </div>
       <div className="mhs-operations">
         <div className="mhs-operations-heading">
@@ -1451,6 +1489,7 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
       <div className="plot-control-bar">
         <div className="chart-controls">
           <RangeSelector range={range} setRange={(nextRange) => { setRange(nextRange); setZoom(null); setBrushRange(null); }} language={language} />
+          <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); setZoom(null); setBrushRange(null); }} language={language} />
           <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom)} reset={resetTouchView} language={language} />
         </div>
         <p className="chart-hint">{translate(language, "normalizedSignal")} · 0 → 1</p>
@@ -1532,8 +1571,13 @@ function argentinaHour(timeMs: number) {
   return new Date(timeMs - 3 * 3_600_000).getUTCHours();
 }
 
-function rmsEnvelope(channel: Channel, minimumTimeMs: number, latestGlobalMs: number) {
-  const points = channel.points.filter((point) => Number.isFinite(point[1])).sort((a, b) => a[0] - b[0]);
+function rmsEnvelope(channel: Channel, minimumTimeMs: number, latestGlobalMs: number, statistic: DisplayStatistic = "value") {
+  const points = channel.points
+    .flatMap((point) => {
+      const value = channelPointValue(point, statistic);
+      return Number.isFinite(value) ? [[point[0], value] as ChannelPoint] : [];
+    })
+    .sort((a, b) => a[0] - b[0]);
   if (points.length < 24) return new Map<number, [number, number]>();
   const prefix = [0];
   for (const point of points) prefix.push(prefix.at(-1)! + point[1]);
@@ -1592,18 +1636,19 @@ function CompactWeatherChart({
   showReference: boolean;
 }) {
   const [selectedIds, setSelectedIds] = useState(() => channels.map((channel) => channel.id));
+  const [displayStatistic, setDisplayStatistic] = useState<DisplayStatistic>("value");
   const [zoomMode, setZoomMode] = useState(false);
   const [zoom, setZoom] = useState<ZoomDomain | null>(null);
   const hoverPointer = useMemo(() => createHoverPointerStore(), []);
   const activeZoom = zoom?.range === range ? zoom : null;
   const data = useMemo(() => {
-    const base = mergeChartData(channels, selectedIds, range, latestGlobalMs);
+    const base = mergeChartData(channels, selectedIds, range, latestGlobalMs, undefined, false, 2400, displayStatistic);
     const rows = new Map<number, ChartDatum>(base.map((row) => [row.timeMs, { ...row }]));
     const duration = timeRangeDurations[range];
     const minimum = duration ? latestGlobalMs - duration : Number.NEGATIVE_INFINITY;
     if (showReference) {
       for (const channel of channels.filter((item) => selectedIds.includes(item.id) && !item.id.includes("wind"))) {
-        for (const [timeMs, band] of rmsEnvelope(channel, minimum, latestGlobalMs)) {
+        for (const [timeMs, band] of rmsEnvelope(channel, minimum, latestGlobalMs, displayStatistic)) {
           const row = rows.get(timeMs) ?? { timeMs };
           row[`band_${channel.id}`] = band;
           rows.set(timeMs, row);
@@ -1628,7 +1673,7 @@ function CompactWeatherChart({
       }
     }
     return [...rows.values()].sort((a, b) => a.timeMs - b.timeMs);
-  }, [channels, selectedIds, range, latestGlobalMs, forecast, showForecast, showReference]);
+  }, [channels, displayStatistic, selectedIds, range, latestGlobalMs, forecast, showForecast, showReference]);
   const zoomKeys = selectedIds.flatMap((id) => [id, ...(showReference ? [`band_${id}`] : []), ...(showForecast ? [`forecast_${id}`] : [])]);
   const currentXDomain: [number, number] = activeZoom
     ? [activeZoom.xMin, activeZoom.xMax]
@@ -1637,10 +1682,11 @@ function CompactWeatherChart({
   const visibleSpanMs = Math.max(1, currentXDomain[1] - currentXDomain[0]);
   const hoverCurves = useMemo(() => channels.flatMap((channel) => {
     if (!selectedIds.includes(channel.id)) return [];
-    const curves = [makeHoverCurve(data, channel.id, channelName(channel, language), channel.unit, channel.color)];
+    const measuredLabel = `${channelName(channel, language)}${displayStatistic === "value" ? "" : ` · ${statisticLabel(displayStatistic, language)}`}`;
+    const curves = [makeHoverCurve(data, channel.id, measuredLabel, channel.unit, channel.color)];
     if (showForecast && forecastFields[channel.id]) curves.push(makeHoverCurve(data, `forecast_${channel.id}`, `${channelName(channel, language)} · ${translate(language, "forecast")}`, channel.unit, channel.color));
     return curves;
-  }), [channels, data, language, selectedIds, showForecast]);
+  }), [channels, data, displayStatistic, language, selectedIds, showForecast]);
 
   function toggleChannel(id: string) {
     setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
@@ -1682,7 +1728,10 @@ function CompactWeatherChart({
         {data.length && selectedIds.length ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { setZoom(zoomFromSelection(selection, range, currentXDomain, currentYDomain)); setZoomMode(false); }} /> : null}
       </div>
       <div className="weather-plot-controls">
-        <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom)} reset={() => setZoom(null)} language={language} />
+        <div className="chart-controls">
+          <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); setZoom(null); }} language={language} />
+          <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom)} reset={() => setZoom(null)} language={language} />
+        </div>
       </div>
     </article>
   );
