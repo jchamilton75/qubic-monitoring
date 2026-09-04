@@ -10,6 +10,8 @@ Local prototype of the new QUBIC cryogenic monitoring system.
 - compact snapshots for the web interface;
 - lightweight status polling: the multi-megabyte snapshot is fetched only when its generation timestamp changes;
 - compact binary-like point tuples in JSON and isolated tooltip updates, avoiding full-chart rerenders while the mouse moves;
+- every plotted tuple is `[timeMs, value, bucketMin, bucketMax]`, so extrema
+  remain available for all channels (not only Touch);
 - viewport-aware chart decimation that keeps local extrema (including short fridge
   peaks) while bounding SVG work, plus a bounded cache for repeated channel selections;
 - 30-second binary aggregates instead of repeatedly parsing full ASCII histories;
