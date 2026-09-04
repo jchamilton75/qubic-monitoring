@@ -12,6 +12,19 @@ test("records the Python analysis contract used for the snapshot", () => {
   assert.ok(Number.isFinite(snapshot.analysis?.generatedAtMs));
 });
 
+test("exports an extrema pair for every plotted channel", () => {
+  const populated = snapshot.channels.filter((channel) => channel.points.length);
+  assert.ok(populated.length > 0, "snapshot contains no plotted channels");
+  for (const channel of populated) {
+    for (const point of channel.points) {
+      assert.ok(point.length >= 4, `${channel.id} point is missing min/max values`);
+      assert.ok(Number.isFinite(point[2]), `${channel.id} point has a non-finite minimum`);
+      assert.ok(Number.isFinite(point[3]), `${channel.id} point has a non-finite maximum`);
+      assert.ok(point[2] <= point[3], `${channel.id} point extrema are inverted`);
+    }
+  }
+});
+
 test("publishes the complete requested telemetry catalogue", () => {
   const bySourceName = new Map(snapshot.channels.map((channel) => [channel.sourceName, channel]));
   const requiredInstrumentSources = [

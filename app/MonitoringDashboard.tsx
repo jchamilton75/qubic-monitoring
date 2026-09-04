@@ -19,7 +19,10 @@ import {
 
 type ChannelStatus = "fresh" | "delayed" | "stale" | "missing";
 
-type ChannelPoint = [timeMs: number, mean: number];
+// Point tuples carry the displayed value plus the raw extrema covered by the
+// same aggregate bucket. Existing consumers can keep using [0] and [1], while
+// decimators and future min/max envelopes can use [2] and [3].
+type ChannelPoint = [timeMs: number, value: number, minimum?: number, maximum?: number];
 
 type Channel = {
   id: string;
@@ -856,8 +859,8 @@ function mergeChartData(
       let minimumPoint = bucket[0];
       let maximumPoint = bucket[0];
       for (const point of bucket) {
-        if (point[1] < minimumPoint[1]) minimumPoint = point;
-        if (point[1] > maximumPoint[1]) maximumPoint = point;
+        if ((point[2] ?? point[1]) < (minimumPoint[2] ?? minimumPoint[1])) minimumPoint = point;
+        if ((point[3] ?? point[1]) > (maximumPoint[3] ?? maximumPoint[1])) maximumPoint = point;
       }
       // Keeping the first and last point makes the decimated line continuous;
       // min/max points preserve narrow fridge and Touch events.

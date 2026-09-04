@@ -507,14 +507,15 @@ function exportSnapshot(database, analysis) {
     ORDER BY timeMs
   `);
   const touchBuckets = database.prepare(`
-    SELECT max_at_ms AS timeMs, MAX(max_value) AS max
+    SELECT max_at_ms AS timeMs, MAX(max_value) AS max, MIN(min_value) AS min
     FROM aggregates
     WHERE channel_id = ? AND sample_count > 0 AND bucket_ms BETWEEN ? AND ?
     GROUP BY CAST((bucket_ms - ?) / ? AS INTEGER)
     ORDER BY MIN(bucket_ms)
   `);
   const peakBuckets = database.prepare(`
-    SELECT CAST(bucket_ms / ? AS INTEGER) * ? AS timeMs, MAX(max_value) AS max
+    SELECT CAST(bucket_ms / ? AS INTEGER) * ? AS timeMs,
+      MIN(min_value) AS min, MAX(max_value) AS max
     FROM aggregates
     WHERE channel_id = ? AND sample_count > 0 AND bucket_ms BETWEEN ? AND ?
     GROUP BY CAST(bucket_ms / ? AS INTEGER)
@@ -535,11 +536,16 @@ function exportSnapshot(database, analysis) {
       if (endMs < startMs) return [];
       const query = definition.category === "touch" ? touchBuckets : buckets;
       return query.all(definition.id, startMs, endMs, startMs, widthMs)
-        .map((point) => [Number(point.timeMs), Number(definition.category === "touch" ? point.max : point.mean)]);
+        .map((point) => {
+          const value = Number(definition.category === "touch" ? point.max : point.mean);
+          const minimum = Number(point.min ?? value);
+          const maximum = Number(point.max ?? value);
+          return [Number(point.timeMs), value, minimum, maximum];
+        });
     };
     const readPeakBuckets = (startMs, endMs) => endMs < startMs ? [] : peakBuckets
       .all(fridgePeakBucketMs, fridgePeakBucketMs, definition.id, startMs, endMs, fridgePeakBucketMs)
-      .map((point) => [Number(point.timeMs), Number(point.max)]);
+      .map((point) => [Number(point.timeMs), Number(point.max), Number(point.min), Number(point.max)]);
     let points = firstMs
       ? preservesPeaks
         ? readPeakBuckets(firstMs, lastMs)
@@ -551,7 +557,7 @@ function exportSnapshot(database, analysis) {
       : [];
     if (definition.category === "touch") {
       const pointsByTime = new Map(points.map((point) => [point[0], point]));
-      for (const event of touchEvents) pointsByTime.set(event.peakMs, [event.peakMs, event.peakValue]);
+      for (const event of touchEvents) pointsByTime.set(event.peakMs, [event.peakMs, event.peakValue, event.peakValue, event.peakValue]);
       points = [...pointsByTime.values()].sort((left, right) => left[0] - right[0]);
     }
     const ageMs = last ? generatedAtMs - Number(last.timeMs) : null;
