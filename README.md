@@ -64,6 +64,35 @@ into 30-second aggregates; later runs resume at the last known byte position in
 each file. Channels announced by the catalogue but absent on site remain
 visible with a `missing` status.
 
+## Python analysis engine
+
+The refactor is being developed on the `python-analysis-refactor` branch. The
+stable starting point is tagged `stable-before-python-refactor`, so the current
+web application can always be restored without losing this work.
+
+The boundary is intentionally simple:
+
+1. Node.js owns synchronization, ASCII parsing, SQLite writes and the compact
+   display snapshot.
+2. `analysis/qubic_analysis/` opens SQLite read-only and owns scientific
+   detections. It currently contains the cryogenic timeline and the mechanical
+   heat-switch (Touch) detector, with documented thresholds and unit tests.
+3. `analysis/run.py` writes an atomic `.local/analysis-results.json` contract;
+   the Node pipeline embeds that result in the public snapshot.
+
+The analysis package uses only Python's standard library. Run its focused
+tests with:
+
+```bash
+npm run analysis:test
+```
+
+This first step keeps the running site unchanged while moving the most
+science-sensitive logic out of the web/data-management process. Resampling and
+other presentation-oriented transformations remain in the collector for now;
+they are the next candidates for the same Python boundary once this contract
+has been validated on live cooldown updates.
+
 Another cooldown can be selected without editing code:
 
 ```bash

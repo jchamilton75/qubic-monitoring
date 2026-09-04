@@ -7,6 +7,7 @@ import {
   existsSync,
   mkdirSync,
   openSync,
+  readFileSync,
   readSync,
   statSync,
   writeFileSync,
@@ -14,6 +15,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
+import { spawnSync } from "node:child_process";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const projectDirectory = resolve(scriptDirectory, "..");
@@ -28,6 +30,8 @@ const cooldownId = sourceDirectoryName
 const databasePath = join(localDirectory, `qubic-monitoring-${cooldownId}-v2.sqlite`);
 const snapshotPath = join(projectDirectory, "public", "data", "monitoring-snapshot.json");
 const statusPath = join(projectDirectory, "public", "data", "monitoring-status.json");
+const analysisScriptPath = join(projectDirectory, "analysis", "run.py");
+const analysisResultsPath = join(localDirectory, "analysis-results.json");
 const storageBucketMs = 30_000;
 const fridgePeakBucketMs = 10 * 60_000;
 const peakPreservingChannelIds = new Set(["avs47_1_ch4", "avs47_1_ch6"]);
@@ -461,160 +465,29 @@ async function ingestSource(database, source) {
   return { sourceId: source.id, status: "updated", inserted, malformed, invalid };
 }
 
-function detectEvents(database) {
-  const beginningOfData = database.prepare(`
-    SELECT MIN(first_at_ms) AS timeMs
-    FROM aggregates
-    WHERE sample_count > 0
-  `).get();
-  const firstBelow = database.prepare(`
-    SELECT first_at_ms AS timeMs
-    FROM aggregates
-    WHERE channel_id = ? AND sample_count > 0 AND (sum_value / sample_count) <= ?
-    ORDER BY bucket_ms ASC LIMIT 1
-  `);
-  const firstAbove = database.prepare(`
-    SELECT first_at_ms AS timeMs
-    FROM aggregates
-    WHERE channel_id = ? AND sample_count > 0 AND (sum_value / sample_count) >= ?
-    ORDER BY bucket_ms ASC LIMIT 1
-  `);
-  const pressureBelow300 = firstBelow.get("pressure1", 300);
-  const ptc1On = firstAbove.get("compressor1_online", 0.5);
-  const ptc2On = firstAbove.get("compressor2_online", 0.5);
-  const pt1S2Below260 = firstBelow.get("avs47_2_ch1", 260);
-  const pt2S2Below260 = firstBelow.get("avs47_2_ch0", 260);
-  const pt1S1Below50 = firstBelow.get("temperature05", 50);
-  const pt2S1Below50 = firstBelow.get("temperature04", 50);
-  const pt1S2Below4p5 = firstBelow.get("avs47_2_ch1", 4.5);
-  const pt2S2Below4p5 = firstBelow.get("avs47_2_ch0", 4.5);
-  const fridge300mKBelow3 = firstBelow.get("avs47_1_ch6", 3);
-  const fridge300mKBelow350mK = firstBelow.get("avs47_1_ch6", 0.35);
-  const fridge1KBelow3 = firstBelow.get("avs47_1_ch4", 3);
-  const fridge1KBelow1 = firstBelow.get("avs47_1_ch4", 1);
-  const base1k = firstBelow.get("avs47_1_ch1", 1.2);
-  const event = (id, type, label, description, detection) => ({
-    id,
-    type,
-    label,
-    description,
-    timeMs: detection ? Number(detection.timeMs) : null,
-    status: detection ? "detected" : "pending",
-    confidence: detection ? "candidate" : "unavailable",
-  });
-  const mainCooldownComplete = pt1S2Below4p5 && pt2S2Below4p5
-    ? { timeMs: Math.max(Number(pt1S2Below4p5.timeMs), Number(pt2S2Below4p5.timeMs)) }
-    : null;
-  const chronological = (events) => events.sort((left, right) => (left.timeMs ?? Number.POSITIVE_INFINITY) - (right.timeMs ?? Number.POSITIVE_INFINITY));
-  return [
-    event("beginning-of-data", "data_start", "Beginning of data", "First valid sample in the current cooldown", beginningOfData?.timeMs != null ? beginningOfData : null),
-    event("pumping", "pumping", "Pressure below 300 mbar", "Pumping detected from the cryostat pressure", pressureBelow300),
-    ...chronological([
-      event("ptc1-on", "cooling_start", "PTC 1 ON", "Pulse-tube compressor 1 is running", ptc1On),
-      event("ptc2-on", "cooling_start", "PTC 2 ON", "Pulse-tube compressor 2 is running", ptc2On),
-    ]),
-    ...chronological([
-      event("pt1-s2-260k", "cooling_260k", "PT1 S2 CH below 260 K", "Second stage of PT1 entered the 270–250 K cooldown phase", pt1S2Below260),
-      event("pt2-s2-260k", "cooling_260k", "PT2 S2 CH below 260 K", "Second stage of PT2 entered the 270–250 K cooldown phase", pt2S2Below260),
-    ]),
-    ...chronological([
-      event("pt1-s1-50k", "stage_40k", "PT1 S1 below 50 K", "First stage of PT1 reached the 40 K regime", pt1S1Below50),
-      event("pt2-s1-50k", "stage_40k", "PT2 S1 below 50 K", "First stage of PT2 reached the 40 K regime", pt2S1Below50),
-    ]),
-    ...chronological([
-      event("pt1-s2-4p5k", "stage_4k", "PT1 S2 CH below 4.5 K", "Second stage of PT1 reached the 4 K regime", pt1S2Below4p5),
-      event("pt2-s2-4p5k", "stage_4k", "PT2 S2 CH below 4.5 K", "Second stage of PT2 reached the 4 K regime", pt2S2Below4p5),
-    ]),
-    event("main-cooldown-complete", "phase_boundary", "End of the main cooldown phase", "Both second PTC stages are below 4.5 K", mainCooldownComplete),
-    ...chronological([
-      event("300mk-fridge-below-3k", "subkelvin_cycle", "300 mK fridge cold head below 3 K", "First 300 mK fridge cycle", fridge300mKBelow3),
-      event("300mk-fridge-below-350mk", "subkelvin_cycle", "300 mK fridge cold head below 350 mK", "First 300 mK fridge cycle", fridge300mKBelow350mK),
-      event("1k-fridge-below-3k", "subkelvin_cycle", "1 K fridge cold head below 3 K", "First 1 K fridge cycle", fridge1KBelow3),
-      event("base-1k", "subkelvin", "1 K stage below 1.2 K", "Automatic candidate — stability to be confirmed", base1k),
-      event("1k-fridge-below-1k", "subkelvin_cycle", "1 K fridge cold head below 1 K", "First 1 K fridge cycle", fridge1KBelow1),
-    ]),
-  ];
+function runPythonAnalysis() {
+  const pythonCommand = process.env.QUBIC_PYTHON ?? "python3";
+  const result = spawnSync(
+    pythonCommand,
+    [analysisScriptPath, "--database", databasePath, "--output", analysisResultsPath],
+    { encoding: "utf8" },
+  );
+  if (result.error || result.status !== 0) {
+    const detail = result.stderr?.trim() || result.error?.message || `exit code ${result.status}`;
+    throw new Error(`Python analysis failed (${pythonCommand}): ${detail}`);
+  }
+  try {
+    return JSON.parse(readFileSync(analysisResultsPath, "utf8"));
+  } catch (error) {
+    throw new Error(`Python analysis produced no valid result: ${error.message}`);
+  }
 }
 
-function detectTouchEvents(database, cryogenicEvents, latestGlobalMs) {
-  const eventsById = new Map(cryogenicEvents.map((event) => [event.id, event]));
-  const ptcTimes = [eventsById.get("ptc1-on")?.timeMs, eventsById.get("ptc2-on")?.timeMs]
-    .filter((timeMs) => Number.isFinite(timeMs));
-  if (!ptcTimes.length) return [];
-  const phaseStartMs = Math.min(...ptcTimes);
-  const phaseEndMs = eventsById.get("main-cooldown-complete")?.timeMs ?? latestGlobalMs;
-  const rows = database.prepare(`
-    SELECT bucket_ms AS bucketMs, first_at_ms AS startMs, last_at_ms AS endMs,
-      max_value AS peakValue, max_at_ms AS peakMs, (sum_value / sample_count) AS meanValue
-    FROM aggregates
-    WHERE channel_id = 'avs47_1_ch0' AND sample_count > 0
-      AND first_at_ms BETWEEN ? AND ?
-    ORDER BY bucket_ms
-  `).all(phaseStartMs, phaseEndMs).map((row) => ({
-    bucketMs: Number(row.bucketMs),
-    startMs: Number(row.startMs),
-    endMs: Number(row.endMs),
-    peakMs: Number(row.peakMs ?? row.startMs),
-    peakValue: Number(row.peakValue),
-    meanValue: Number(row.meanValue),
-  }));
-  if (rows.length < 21) return [];
-  const highRows = [];
-  for (let index = 20; index < rows.length; index += 1) {
-    const localValues = rows.slice(index - 20, index).map((row) => row.meanValue).sort((left, right) => left - right);
-    const baseline = localValues[Math.floor(localValues.length / 2)];
-    const threshold = Math.max(Number.EPSILON, baseline * 1.08);
-    if (rows[index].peakValue >= threshold) {
-      highRows.push({ ...rows[index], baseline, threshold, peakRatio: rows[index].peakValue / baseline });
-    }
-  }
-  const operations = [];
-  let active = null;
-  for (const row of highRows) {
-    if (!active || row.bucketMs - active.lastBucketMs > 120_000) {
-      if (active) operations.push(active);
-      active = {
-        startMs: row.startMs,
-        endMs: row.endMs,
-        peakMs: row.peakMs,
-        peakValue: row.peakValue,
-        peakRatio: row.peakRatio,
-        baseline: row.baseline,
-        threshold: row.threshold,
-        bucketCount: 1,
-        lastBucketMs: row.bucketMs,
-      };
-      continue;
-    }
-    active.endMs = Math.max(active.endMs, row.endMs);
-    active.lastBucketMs = row.bucketMs;
-    active.bucketCount += 1;
-    if (row.peakValue > active.peakValue) {
-      active.peakValue = row.peakValue;
-      active.peakMs = row.peakMs;
-      active.peakRatio = row.peakRatio;
-      active.baseline = row.baseline;
-      active.threshold = row.threshold;
-    }
-  }
-  if (active) operations.push(active);
-  return operations.filter((operation) => operation.bucketCount >= 2 || operation.peakRatio >= 1.15).map((operation, index) => ({
-    id: `mhs-operation-${index + 1}`,
-    startMs: operation.startMs,
-    peakMs: operation.peakMs,
-    endMs: operation.endMs,
-    peakValue: operation.peakValue,
-    baseline: operation.baseline,
-    threshold: operation.threshold,
-    peakRatio: operation.peakRatio,
-  }));
-}
-
-function exportSnapshot(database) {
+function exportSnapshot(database, analysis) {
   const generatedAtMs = Date.now();
   const latestGlobalMs = Number(database.prepare("SELECT MAX(last_at_ms) AS latestMs FROM aggregates WHERE sample_count > 0").get().latestMs ?? 0);
-  const events = detectEvents(database);
-  const touchEvents = detectTouchEvents(database, events, latestGlobalMs);
+  const events = Array.isArray(analysis?.events) ? analysis.events : [];
+  const touchEvents = Array.isArray(analysis?.touchEvents) ? analysis.touchEvents : [];
   const bounds = database.prepare(`
     SELECT MIN(CASE WHEN sample_count > 0 THEN first_at_ms END) AS firstMs,
       MAX(CASE WHEN sample_count > 0 THEN last_at_ms END) AS latestMs,
@@ -697,6 +570,11 @@ function exportSnapshot(database) {
   const oneKelvin = channels.find((channel) => channel.id === "avs47_1_ch1");
   const snapshot = {
     generatedAtMs, latestGlobalMs,
+    analysis: {
+      engine: analysis?.engine ?? "python",
+      schemaVersion: Number(analysis?.schemaVersion ?? 1),
+      generatedAtMs: Number(analysis?.generatedAtMs ?? generatedAtMs),
+    },
     cooldown: { ...cooldown, phase: oneKelvin?.latestValue != null && oneKelvin.latestValue <= 1.2 ? "Cold phase — partial stream" : "Cooldown" },
     events,
     touchEvents,
@@ -718,11 +596,16 @@ function exportSnapshot(database) {
 export async function refreshMonitoringData() {
   mkdirSync(localDirectory, { recursive: true });
   const database = new DatabaseSync(databasePath);
+  // A watcher may be finishing an ingestion transaction at the same time as
+  // a manual refresh.  Let SQLite wait briefly instead of failing on a
+  // transient writer lock.
+  database.exec("PRAGMA busy_timeout = 60000");
   initializeDatabase(database);
   const results = [];
   try {
     for (const source of sourceDefinitions) results.push(await ingestSource(database, source));
-    const snapshot = exportSnapshot(database);
+    const analysis = runPythonAnalysis();
+    const snapshot = exportSnapshot(database, analysis);
     database.exec("PRAGMA optimize");
     return { databasePath, snapshotPath, results, snapshot };
   } finally {

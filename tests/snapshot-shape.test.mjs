@@ -6,6 +6,12 @@ const snapshot = JSON.parse(
   await readFile(new URL("../public/data/monitoring-snapshot.json", import.meta.url), "utf8"),
 );
 
+test("records the Python analysis contract used for the snapshot", () => {
+  assert.equal(snapshot.analysis?.engine, "python");
+  assert.equal(snapshot.analysis?.schemaVersion, 1);
+  assert.ok(Number.isFinite(snapshot.analysis?.generatedAtMs));
+});
+
 test("publishes the complete requested telemetry catalogue", () => {
   const bySourceName = new Map(snapshot.channels.map((channel) => [channel.sourceName, channel]));
   const requiredInstrumentSources = [
