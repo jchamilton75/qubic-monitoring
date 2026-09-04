@@ -820,15 +820,51 @@ function mergeChartData(
   latestGlobalMs: number,
   timelineStartMs?: number,
   zeroBeforeFirstData = false,
+  maxPointsPerChannel = 2400,
 ) {
   const duration = timeRangeDurations[range];
   const minimum = duration ? latestGlobalMs - duration : Number.NEGATIVE_INFINITY;
   const rows = new Map<number, ChartDatum>();
   const selected = new Set(selectedIds);
 
+  // The database already stores range-dependent aggregates, but a long
+  // cooldown still contains thousands of points per series. Recharts has to
+  // build an SVG path for every one of them whenever a channel is toggled.
+  // Keep extrema in each small time bucket so brief cryogenic peaks survive,
+  // while bounding the amount of work needed for a redraw.
+  const visiblePoints = (points: ChannelPoint[]) => {
+    let start = 0;
+    if (Number.isFinite(minimum)) {
+      let high = points.length;
+      while (start < high) {
+        const middle = Math.floor((start + high) / 2);
+        if (points[middle][0] < minimum) start = middle + 1;
+        else high = middle;
+      }
+    }
+    const visible = points.slice(start);
+    if (visible.length <= maxPointsPerChannel) return visible;
+    const bucketSize = Math.max(1, Math.ceil(visible.length / Math.max(1, Math.floor(maxPointsPerChannel / 2))));
+    const retained = new Map<number, ChannelPoint>();
+    for (let bucketStart = 0; bucketStart < visible.length; bucketStart += bucketSize) {
+      const bucket = visible.slice(bucketStart, bucketStart + bucketSize);
+      let minimumPoint = bucket[0];
+      let maximumPoint = bucket[0];
+      for (const point of bucket) {
+        if (point[1] < minimumPoint[1]) minimumPoint = point;
+        if (point[1] > maximumPoint[1]) maximumPoint = point;
+      }
+      // Keeping the first and last point makes the decimated line continuous;
+      // min/max points preserve narrow fridge and Touch events.
+      for (const point of [bucket[0], minimumPoint, maximumPoint, bucket.at(-1)!]) retained.set(point[0], point);
+    }
+    return [...retained.values()].sort((left, right) => left[0] - right[0]);
+  };
+
   for (const channel of channels) {
     if (!selected.has(channel.id)) continue;
     const firstPoint = channel.points[0];
+    const points = visiblePoints(channel.points);
     if (range === "all" && zeroBeforeFirstData && timelineStartMs !== undefined && firstPoint?.[0] > timelineStartMs) {
       for (const timeMs of [timelineStartMs, firstPoint[0] - 1]) {
         const row = rows.get(timeMs) ?? { timeMs };
@@ -837,8 +873,7 @@ function mergeChartData(
         rows.set(timeMs, row);
       }
     }
-    for (const point of channel.points) {
-      if (point[0] < minimum) continue;
+    for (const point of points) {
       const row = rows.get(point[0]) ?? { timeMs: point[0] };
       row[channel.id] = point[1];
       rows.set(point[0], row);
@@ -846,6 +881,40 @@ function mergeChartData(
   }
 
   return [...rows.values()].sort((a, b) => a.timeMs - b.timeMs);
+}
+
+// Selection changes are common during interactive housekeeping review. Keep a
+// small process-local cache so toggling back to a recent combination reuses the
+// already merged rows instead of rebuilding every channel from scratch.
+const chartDataCache = new Map<string, ChartDatum[]>();
+
+function cachedMergeChartData(
+  channels: Channel[],
+  selectedIds: string[],
+  range: TimeRange,
+  latestGlobalMs: number,
+  timelineStartMs: number | undefined,
+  zeroBeforeFirstData: boolean,
+  revision: string,
+) {
+  const key = `${revision}|${range}|${selectedIds.join(",")}|${timelineStartMs ?? ""}|${zeroBeforeFirstData ? 1 : 0}`;
+  const cached = chartDataCache.get(key);
+  if (cached) return cached;
+  const next = mergeChartData(
+    channels,
+    selectedIds,
+    range,
+    latestGlobalMs,
+    timelineStartMs,
+    zeroBeforeFirstData,
+    chartPointBudgets[range],
+  );
+  chartDataCache.set(key, next);
+  if (chartDataCache.size > 32) {
+    const oldest = chartDataCache.keys().next().value;
+    if (oldest !== undefined) chartDataCache.delete(oldest);
+  }
+  return next;
 }
 
 function StatusDot({ status }: { status: ChannelStatus }) {
@@ -905,6 +974,14 @@ function MetricCard({
 }
 
 const rangeIds: TimeRange[] = ["1h", "2h", "48h", "7d", "30d", "all"];
+const chartPointBudgets: Record<TimeRange, number> = {
+  "1h": 1200,
+  "2h": 1200,
+  "48h": 1800,
+  "7d": 2200,
+  "30d": 2400,
+  all: 2400,
+};
 
 function RangeSelector({ range, setRange, language }: { range: TimeRange; setRange: (range: TimeRange) => void; language: Language }) {
   return (
@@ -1139,9 +1216,13 @@ function TelemetryChart({
   const [zoom, setZoom] = useState<ZoomDomain | null>(null);
   const [brushRange, setBrushRange] = useState<{ startIndex: number; endIndex: number } | null>(null);
   const hoverPointer = useMemo(() => createHoverPointerStore(), []);
+  const dataRevision = useMemo(
+    () => `${latestGlobalMs}|${channels.map((channel) => `${channel.id}:${channel.latestMs}:${channel.points.length}`).join("|")}`,
+    [channels, latestGlobalMs],
+  );
   const data = useMemo(
-    () => mergeChartData(channels, selectedIds, range, latestGlobalMs, timelineStartMs, zeroBeforeFirstData),
-    [channels, selectedIds, range, latestGlobalMs, timelineStartMs, zeroBeforeFirstData],
+    () => cachedMergeChartData(channels, selectedIds, range, latestGlobalMs, timelineStartMs, zeroBeforeFirstData, dataRevision),
+    [channels, dataRevision, latestGlobalMs, range, selectedIds, timelineStartMs, zeroBeforeFirstData],
   );
   const units = Array.from(new Set(channels.filter((channel) => selectedIds.includes(channel.id)).map((channel) => channel.unit)));
   const axisUnit = units.length === 1 ? ` ${units[0]}` : "";
