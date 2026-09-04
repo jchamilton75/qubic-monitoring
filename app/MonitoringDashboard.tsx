@@ -67,6 +67,11 @@ type TouchEvent = {
 type MonitoringSnapshot = {
   generatedAtMs: number;
   latestGlobalMs: number;
+  analysis?: {
+    engine: string;
+    schemaVersion: number;
+    generatedAtMs: number;
+  };
   cooldown: {
     id: string;
     label: string;
