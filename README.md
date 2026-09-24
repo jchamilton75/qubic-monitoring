@@ -70,9 +70,10 @@ visible with a `missing` status.
 
 ## Python analysis engine
 
-The refactor is being developed on the `python-analysis-refactor` branch. The
-stable starting point is tagged `stable-before-python-refactor`, so the current
-web application can always be restored without losing this work.
+The Python-refactored application is now maintained on the `main` branch. The
+previous stable starting point remains available through the `stable` branch
+and the `stable-before-python-refactor` tag, so the former web application can
+always be restored without losing this work.
 
 The boundary is intentionally simple:
 
