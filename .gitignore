@@ -41,4 +41,5 @@ yarn-error.log*
 /outputs/
 /work/
 /.local/
+/public/data/*.json
 *.tsbuildinfo

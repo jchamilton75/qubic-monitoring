@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const snapshot = JSON.parse(
-  await readFile(new URL("../public/data/monitoring-snapshot.json", import.meta.url), "utf8"),
-);
+// The live snapshot is intentionally not committed: it contains the complete
+// telemetry history. This compact synthetic fixture keeps the shape tests
+// reproducible on GitHub and CI without publishing observatory data.
+import snapshot from "./fixtures/monitoring-snapshot.mjs";
 
 test("records the Python analysis contract used for the snapshot", () => {
   assert.equal(snapshot.analysis?.engine, "python");
