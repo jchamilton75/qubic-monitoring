@@ -107,6 +107,17 @@ type WeatherForecast = {
   generatedAtMs: number;
   source: string;
   points: ForecastPoint[];
+  history?: ForecastRun[];
+};
+
+type ForecastRun = {
+  generatedAtMs: number;
+  points: ForecastPoint[];
+};
+
+type DynamicChannelResponse = {
+  points: Record<string, ChannelPoint[]>;
+  bucketMs: number;
 };
 
 type ZoomDomain = {
@@ -267,6 +278,8 @@ const messages: Record<Language, Record<string, string>> = {
     weatherTitle: "Weather at Alto Chorrillos",
     weatherCopy: "Outside weather and indoor conditions, including atmospheric pressure, wind speed and wind direction.",
     forecast: "Forecast",
+    forecastHistory: "Past forecasts",
+    forecastHistoryCopy: "Archived forecasts issued during this cooldown",
     forecastUnavailable: "Forecast temporarily unavailable",
     forecastSource: "Open-Meteo forecast · QUBIC coordinates and 4,869 m elevation",
     diurnalReference: "7-day RMS envelope",
@@ -440,6 +453,7 @@ const messages: Record<Language, Record<string, string>> = {
     observatoryAlt: "Observatoire QUBIC à Alto Chorrillos", daysBefore: "−2 jours", eventT0: "Événement t₀", daysAfter: "+12 jours",
     "channel.avs47_1_ch1": "Étage 1 K", "channel.avs47_1_ch4": "Tête froide frigo 1 K", "channel.avs47_1_ch6": "Tête froide frigo 300 mK", "channel.temperature06": "Filtres 4 K", "channel.pressure1": "Pression cryostat", "channel.inside_temperature": "Température intérieure", "channel.inside_humidity": "Humidité intérieure",
     "event.beginning-of-data.title": "Début des données", "event.beginning-of-data.copy": "Premier échantillon valide du cooldown courant", "event.pumping.title": "Pression sous 300 mbar", "event.pumping.copy": "Pompage détecté à partir de la pression du cryostat", "event.ptc1-on.title": "PTC 1 ON", "event.ptc1-on.copy": "Le compresseur 1 du tube pulsé fonctionne", "event.ptc2-on.title": "PTC 2 ON", "event.ptc2-on.copy": "Le compresseur 2 du tube pulsé fonctionne", "event.pt1-s2-260k.title": "PT1 S2 CH sous 260 K", "event.pt1-s2-260k.copy": "Le second étage de PT1 entre dans la phase de refroidissement 270–250 K", "event.pt2-s2-260k.title": "PT2 S2 CH sous 260 K", "event.pt2-s2-260k.copy": "Le second étage de PT2 entre dans la phase de refroidissement 270–250 K", "event.pt1-s1-50k.title": "PT1 S1 sous 50 K", "event.pt1-s1-50k.copy": "Le premier étage de PT1 atteint le régime 40 K", "event.pt2-s1-50k.title": "PT2 S1 sous 50 K", "event.pt2-s1-50k.copy": "Le premier étage de PT2 atteint le régime 40 K", "event.pt1-s2-4p5k.title": "PT1 S2 CH sous 4,5 K", "event.pt1-s2-4p5k.copy": "Le second étage de PT1 atteint le régime 4 K", "event.pt2-s2-4p5k.title": "PT2 S2 CH sous 4,5 K", "event.pt2-s2-4p5k.copy": "Le second étage de PT2 atteint le régime 4 K", "event.main-cooldown-complete.title": "Fin du refroidissement principal", "event.main-cooldown-complete.copy": "Les deux seconds étages des PTC sont sous 4,5 K", "event.300mk-fridge-below-3k.title": "Tête froide du frigo 300 mK sous 3 K", "event.300mk-fridge-below-3k.copy": "Premier cyclage du frigo 300 mK", "event.300mk-fridge-below-350mk.title": "Tête froide du frigo 300 mK sous 350 mK", "event.300mk-fridge-below-350mk.copy": "Premier cyclage du frigo 300 mK", "event.1k-fridge-below-3k.title": "Tête froide du frigo 1 K sous 3 K", "event.1k-fridge-below-3k.copy": "Premier cyclage du frigo 1 K", "event.1k-fridge-below-1k.title": "Tête froide du frigo 1 K sous 1 K", "event.1k-fridge-below-1k.copy": "Premier cyclage du frigo 1 K", "event.base-1k.title": "Étage 1 K sous 1,2 K", "event.base-1k.copy": "Candidat automatique — stabilité à confirmer",
+    forecastHistory: "Prévisions passées", forecastHistoryCopy: "Prévisions archivées émises pendant ce cooldown",
   },
   es: {
     "nav.monitoring": "Monitoreo del cooldown", "nav.cycles": "Análisis de ciclos de los frigos", "nav.compare": "Comparación de cooldowns", "nav.sources": "Calidad / Fuentes", "nav.webcams": "Webcams",
@@ -464,6 +478,7 @@ const messages: Record<Language, Record<string, string>> = {
     observatoryAlt: "Observatorio QUBIC en Alto Chorrillos", daysBefore: "−2 días", eventT0: "Evento t₀", daysAfter: "+12 días",
     "channel.avs47_1_ch1": "Etapa de 1 K", "channel.avs47_1_ch4": "Cabezal frío del frigo de 1 K", "channel.avs47_1_ch6": "Cabezal frío del frigo de 300 mK", "channel.temperature06": "Filtros de 4 K", "channel.pressure1": "Presión del criostato", "channel.inside_temperature": "Temperatura interior", "channel.inside_humidity": "Humedad interior",
     "event.beginning-of-data.title": "Inicio de los datos", "event.beginning-of-data.copy": "Primera muestra válida del cooldown actual", "event.pumping.title": "Presión por debajo de 300 mbar", "event.pumping.copy": "Bombeo detectado a partir de la presión del criostato", "event.ptc1-on.title": "PTC 1 ON", "event.ptc1-on.copy": "El compresor 1 del tubo de pulso está funcionando", "event.ptc2-on.title": "PTC 2 ON", "event.ptc2-on.copy": "El compresor 2 del tubo de pulso está funcionando", "event.pt1-s2-260k.title": "PT1 S2 CH por debajo de 260 K", "event.pt1-s2-260k.copy": "La segunda etapa de PT1 entró en la fase de enfriamiento de 270–250 K", "event.pt2-s2-260k.title": "PT2 S2 CH por debajo de 260 K", "event.pt2-s2-260k.copy": "La segunda etapa de PT2 entró en la fase de enfriamiento de 270–250 K", "event.pt1-s1-50k.title": "PT1 S1 por debajo de 50 K", "event.pt1-s1-50k.copy": "La primera etapa de PT1 alcanzó el régimen de 40 K", "event.pt2-s1-50k.title": "PT2 S1 por debajo de 50 K", "event.pt2-s1-50k.copy": "La primera etapa de PT2 alcanzó el régimen de 40 K", "event.pt1-s2-4p5k.title": "PT1 S2 CH por debajo de 4,5 K", "event.pt1-s2-4p5k.copy": "La segunda etapa de PT1 alcanzó el régimen de 4 K", "event.pt2-s2-4p5k.title": "PT2 S2 CH por debajo de 4,5 K", "event.pt2-s2-4p5k.copy": "La segunda etapa de PT2 alcanzó el régimen de 4 K", "event.main-cooldown-complete.title": "Fin de la fase principal de enfriamiento", "event.main-cooldown-complete.copy": "Las dos segundas etapas de los PTC están por debajo de 4,5 K", "event.300mk-fridge-below-3k.title": "Cabezal frío del refrigerador de 300 mK por debajo de 3 K", "event.300mk-fridge-below-3k.copy": "Primer ciclo del refrigerador de 300 mK", "event.300mk-fridge-below-350mk.title": "Cabezal frío del refrigerador de 300 mK por debajo de 350 mK", "event.300mk-fridge-below-350mk.copy": "Primer ciclo del refrigerador de 300 mK", "event.1k-fridge-below-3k.title": "Cabezal frío del refrigerador de 1 K por debajo de 3 K", "event.1k-fridge-below-3k.copy": "Primer ciclo del refrigerador de 1 K", "event.1k-fridge-below-1k.title": "Cabezal frío del refrigerador de 1 K por debajo de 1 K", "event.1k-fridge-below-1k.copy": "Primer ciclo del refrigerador de 1 K", "event.base-1k.title": "Etapa de 1 K por debajo de 1,2 K", "event.base-1k.copy": "Candidato automático — estabilidad por confirmar",
+    forecastHistory: "Pronósticos anteriores", forecastHistoryCopy: "Pronósticos archivados emitidos durante este cooldown",
   },
   it: {
     "nav.monitoring": "Monitoraggio del cooldown", "nav.cycles": "Analisi dei cicli dei frigo", "nav.compare": "Confronto dei cooldown", "nav.sources": "Qualità / Sorgenti", "nav.webcams": "Webcam",
@@ -488,6 +503,7 @@ const messages: Record<Language, Record<string, string>> = {
     observatoryAlt: "Osservatorio QUBIC ad Alto Chorrillos", daysBefore: "−2 giorni", eventT0: "Evento t₀", daysAfter: "+12 giorni",
     "channel.avs47_1_ch1": "Stadio 1 K", "channel.avs47_1_ch4": "Testa fredda frigo 1 K", "channel.avs47_1_ch6": "Testa fredda frigo 300 mK", "channel.temperature06": "Filtri 4 K", "channel.pressure1": "Pressione criostato", "channel.inside_temperature": "Temperatura interna", "channel.inside_humidity": "Umidità interna",
     "event.beginning-of-data.title": "Inizio dei dati", "event.beginning-of-data.copy": "Primo campione valido del cooldown corrente", "event.pumping.title": "Pressione sotto 300 mbar", "event.pumping.copy": "Pompaggio rilevato dalla pressione del criostato", "event.ptc1-on.title": "PTC 1 ON", "event.ptc1-on.copy": "Il compressore 1 del pulse tube è in funzione", "event.ptc2-on.title": "PTC 2 ON", "event.ptc2-on.copy": "Il compressore 2 del pulse tube è in funzione", "event.pt1-s2-260k.title": "PT1 S2 CH sotto 260 K", "event.pt1-s2-260k.copy": "Il secondo stadio di PT1 è entrato nella fase di raffreddamento 270–250 K", "event.pt2-s2-260k.title": "PT2 S2 CH sotto 260 K", "event.pt2-s2-260k.copy": "Il secondo stadio di PT2 è entrato nella fase di raffreddamento 270–250 K", "event.pt1-s1-50k.title": "PT1 S1 sotto 50 K", "event.pt1-s1-50k.copy": "Il primo stadio di PT1 ha raggiunto il regime di 40 K", "event.pt2-s1-50k.title": "PT2 S1 sotto 50 K", "event.pt2-s1-50k.copy": "Il primo stadio di PT2 ha raggiunto il regime di 40 K", "event.pt1-s2-4p5k.title": "PT1 S2 CH sotto 4,5 K", "event.pt1-s2-4p5k.copy": "Il secondo stadio di PT1 ha raggiunto il regime di 4 K", "event.pt2-s2-4p5k.title": "PT2 S2 CH sotto 4,5 K", "event.pt2-s2-4p5k.copy": "Il secondo stadio di PT2 ha raggiunto il regime di 4 K", "event.main-cooldown-complete.title": "Fine della fase principale di raffreddamento", "event.main-cooldown-complete.copy": "Entrambi i secondi stadi dei PTC sono sotto 4,5 K", "event.300mk-fridge-below-3k.title": "Testa fredda del refrigeratore da 300 mK sotto 3 K", "event.300mk-fridge-below-3k.copy": "Primo ciclo del refrigeratore da 300 mK", "event.300mk-fridge-below-350mk.title": "Testa fredda del refrigeratore da 300 mK sotto 350 mK", "event.300mk-fridge-below-350mk.copy": "Primo ciclo del refrigeratore da 300 mK", "event.1k-fridge-below-3k.title": "Testa fredda del refrigeratore da 1 K sotto 3 K", "event.1k-fridge-below-3k.copy": "Primo ciclo del refrigeratore da 1 K", "event.1k-fridge-below-1k.title": "Testa fredda del refrigeratore da 1 K sotto 1 K", "event.1k-fridge-below-1k.copy": "Primo ciclo del refrigeratore da 1 K", "event.base-1k.title": "Stadio 1 K sotto 1,2 K", "event.base-1k.copy": "Candidato automatico — stabilità da confermare",
+    forecastHistory: "Previsioni passate", forecastHistoryCopy: "Previsioni archiviate emesse durante questo cooldown",
   },
 };
 
@@ -907,6 +923,25 @@ function mergeChartData(
   return [...rows.values()].sort((a, b) => a.timeMs - b.timeMs);
 }
 
+async function fetchDynamicChannelPoints(
+  channelIds: string[],
+  startMs: number,
+  endMs: number,
+  statistic: DisplayStatistic,
+  maxPoints = 2400,
+) {
+  const query = new URLSearchParams({
+    ids: channelIds.join(","),
+    start: String(Math.floor(startMs)),
+    end: String(Math.ceil(endMs)),
+    statistic,
+    maxPoints: String(maxPoints),
+  });
+  const response = await fetch(`/api/channel-data?${query}`, { cache: "no-store" });
+  if (!response.ok) throw new Error("Detailed channel data unavailable");
+  return await response.json() as DynamicChannelResponse;
+}
+
 // Selection changes are common during interactive housekeeping review. Keep a
 // small process-local cache so toggling back to a recent combination reuses the
 // already merged rows instead of rebuilding every channel from scratch.
@@ -1255,25 +1290,38 @@ function TelemetryChart({
   const [zoomMode, setZoomMode] = useState(false);
   const [zoom, setZoom] = useState<ZoomDomain | null>(null);
   const [brushRange, setBrushRange] = useState<{ startIndex: number; endIndex: number } | null>(null);
+  const [detailPoints, setDetailPoints] = useState<Record<string, ChannelPoint[]>>({});
+  const [detailWindow, setDetailWindow] = useState<[number, number] | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const detailRequestRef = useRef(0);
+  const detailTimerRef = useRef<number | null>(null);
   const hoverPointer = useMemo(() => createHoverPointerStore(), []);
+  const chartChannels = useMemo(() => channels.map((channel) => detailPoints[channel.id]
+    ? { ...channel, points: detailPoints[channel.id] }
+    : channel), [channels, detailPoints]);
   const dataRevision = useMemo(
-    () => `${latestGlobalMs}|${channels.map((channel) => `${channel.id}:${channel.latestMs}:${channel.points.length}`).join("|")}`,
-    [channels, latestGlobalMs],
+    () => `${latestGlobalMs}|${chartChannels.map((channel) => `${channel.id}:${channel.latestMs}:${channel.points.length}`).join("|")}`,
+    [chartChannels, latestGlobalMs],
   );
   const data = useMemo(
-    () => cachedMergeChartData(channels, selectedIds, range, latestGlobalMs, timelineStartMs, zeroBeforeFirstData, dataRevision, displayStatistic),
-    [channels, dataRevision, displayStatistic, latestGlobalMs, range, selectedIds, timelineStartMs, zeroBeforeFirstData],
+    () => cachedMergeChartData(chartChannels, selectedIds, range, latestGlobalMs, timelineStartMs, zeroBeforeFirstData, dataRevision, displayStatistic),
+    [chartChannels, dataRevision, displayStatistic, latestGlobalMs, range, selectedIds, timelineStartMs, zeroBeforeFirstData],
   );
+  const displayedData = detailWindow
+    ? data.filter((row) => row.timeMs >= detailWindow[0] && row.timeMs <= detailWindow[1])
+    : data;
   const units = Array.from(new Set(channels.filter((channel) => selectedIds.includes(channel.id)).map((channel) => channel.unit)));
   const axisUnit = units.length === 1 ? ` ${units[0]}` : "";
   const activeZoom = zoom?.range === range ? zoom : null;
-  const brushedData = brushRange ? data.slice(brushRange.startIndex, brushRange.endIndex + 1) : data;
+  const brushedData = brushRange ? displayedData.slice(brushRange.startIndex, brushRange.endIndex + 1) : displayedData;
   const currentXDomain: [number, number] = activeZoom
     ? [activeZoom.xMin, activeZoom.xMax]
-    : [brushedData[0]?.timeMs ?? data[0]?.timeMs ?? 0, brushedData.at(-1)?.timeMs ?? data.at(-1)?.timeMs ?? 1];
+    : detailWindow
+      ? detailWindow
+      : [brushedData[0]?.timeMs ?? data[0]?.timeMs ?? 0, brushedData.at(-1)?.timeMs ?? data.at(-1)?.timeMs ?? 1];
   const computedYDomain: [number, number] = activeZoom
     ? [activeZoom.yMin, activeZoom.yMax]
-    : chartExtent(data, selectedIds, logScale, currentXDomain);
+    : chartExtent(displayedData, selectedIds, logScale, currentXDomain);
   const currentYDomain: [number, number] = hardYMinimum !== undefined && !logScale
     ? [Math.max(hardYMinimum, computedYDomain[0]), Math.max(hardYMinimum + Number.EPSILON, computedYDomain[1])]
     : computedYDomain;
@@ -1285,13 +1333,39 @@ function TelemetryChart({
     const aggregateLabel = channel.aggregation === "bucket_max_10m" ? ` · ${translate(language, "fridgeBucketMaximum")}` : "";
     const selectedStatisticLabel = displayStatistic === "value" ? "" : ` · ${statisticLabel(displayStatistic, language)}`;
     const label = `${channelName(channel, language)}${aggregateLabel}${selectedStatisticLabel}`;
-    return [makeHoverCurve(data, id, label, channel.unit, channel.color)];
-  }), [channels, data, displayStatistic, language, selectedIds]);
+    return [makeHoverCurve(displayedData, id, label, channel.unit, channel.color)];
+  }), [channels, displayStatistic, displayedData, language, selectedIds]);
+
+  async function loadDetailedWindow(startMs: number, endMs: number) {
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return;
+    const requestId = ++detailRequestRef.current;
+    setDetailWindow([startMs, endMs]);
+    setDetailPoints({});
+    setDetailLoading(true);
+    try {
+      const response = await fetchDynamicChannelPoints(selectedIds, startMs, endMs, displayStatistic, Math.max(2400, chartPointBudgets[range] * 2));
+      if (requestId === detailRequestRef.current) setDetailPoints(response.points);
+    } catch {
+      if (requestId === detailRequestRef.current) setDetailPoints({});
+    } finally {
+      if (requestId === detailRequestRef.current) setDetailLoading(false);
+    }
+  }
+
+  function resetDataZoom() {
+    detailRequestRef.current += 1;
+    if (detailTimerRef.current !== null) window.clearTimeout(detailTimerRef.current);
+    detailTimerRef.current = null;
+    setDetailPoints({});
+    setDetailWindow(null);
+    setDetailLoading(false);
+    setZoom(null);
+    setBrushRange(null);
+  }
 
   function toggleChannel(id: string) {
     setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
-    setZoom(null);
-    setBrushRange(null);
+    resetDataZoom();
   }
 
   return (
@@ -1306,8 +1380,8 @@ function TelemetryChart({
 
       <div className="selector-tools">
         <span>{translate(language, "visibleChannels")}</span>
-        <button type="button" onClick={() => { setSelectedIds(channels.map((channel) => channel.id)); setZoom(null); setBrushRange(null); }}>{translate(language, "selectAll")}</button>
-        <button type="button" onClick={() => { setSelectedIds([]); setZoom(null); setBrushRange(null); }}>{translate(language, "clearSelection")}</button>
+        <button type="button" onClick={() => { setSelectedIds(channels.map((channel) => channel.id)); resetDataZoom(); }}>{translate(language, "selectAll")}</button>
+        <button type="button" onClick={() => { setSelectedIds([]); resetDataZoom(); }}>{translate(language, "clearSelection")}</button>
       </div>
       <div className="channel-selector detailed-selector" aria-label={translate(language, "visibleChannels")}>
         {channels.map((channel) => {
@@ -1323,11 +1397,11 @@ function TelemetryChart({
       </div>
 
       <div className="chart-wrap">
-        {data.length ? (
+        {displayedData.length ? (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data} margin={{ top: 18, right: 20, left: 6, bottom: 6 }} onMouseMove={(state) => hoverPointer.set(state.activeCoordinate ?? null)} onMouseLeave={() => hoverPointer.set(null)}>
+            <LineChart data={displayedData} margin={{ top: 18, right: 20, left: 6, bottom: 6 }} onMouseMove={(state) => hoverPointer.set(state.activeCoordinate ?? null)} onMouseLeave={() => hoverPointer.set(null)}>
               <CartesianGrid stroke="rgba(148, 163, 184, 0.12)" vertical={false} />
-              <XAxis dataKey="timeMs" type="number" scale="time" domain={activeZoom ? [activeZoom.xMin, activeZoom.xMax] : ["dataMin", "dataMax"]} allowDataOverflow={Boolean(activeZoom)} tickFormatter={(value) => formatCompactDate(value, language, visibleSpanMs, timeZone)} stroke="#66758a" tick={{ fill: "#9aa8bb", fontSize: 11 }} minTickGap={42} />
+              <XAxis dataKey="timeMs" type="number" scale="time" domain={activeZoom ? [activeZoom.xMin, activeZoom.xMax] : detailWindow ?? ["dataMin", "dataMax"]} allowDataOverflow={Boolean(activeZoom || detailWindow)} tickFormatter={(value) => formatCompactDate(value, language, visibleSpanMs, timeZone)} stroke="#66758a" tick={{ fill: "#9aa8bb", fontSize: 11 }} minTickGap={42} />
               <YAxis type="number" scale={logScale ? "log" : "auto"} domain={currentYDomain} allowDataOverflow tickFormatter={(value) => formatAxisTick(value, language, logScale)} stroke="#66758a" tick={{ fill: "#9aa8bb", fontSize: 11 }} width={66} unit={axisUnit} />
               <DayBoundaryLines domain={currentXDomain} timeZone={timeZone} />
               <CryogenicPhaseLines events={events} domain={currentXDomain} language={language} />
@@ -1336,20 +1410,28 @@ function TelemetryChart({
                 <Line key={channel.id} type={channel.aggregation === "bucket_max_10m" ? "linear" : "monotone"} dataKey={channel.id} name={channel.id} stroke={channel.color} strokeWidth={channel.id === "avs47_1_ch1" || channel.id.endsWith("_pin") ? 2.6 : 1.7} dot={false} activeDot={false} connectNulls isAnimationActive={false} />
               ) : null)}
               <Brush dataKey="timeMs" height={28} stroke="#4a607d" fill="#0d1828" travellerWidth={8} tickFormatter={(value) => formatCompactDate(value, language, fullSpanMs, timeZone)} onChange={(selection) => {
-                if (typeof selection.startIndex === "number" && typeof selection.endIndex === "number") setBrushRange({ startIndex: selection.startIndex, endIndex: selection.endIndex });
+                if (typeof selection.startIndex === "number" && typeof selection.endIndex === "number") {
+                  const startMs = displayedData[selection.startIndex]?.timeMs;
+                  const endMs = displayedData[selection.endIndex]?.timeMs;
+                  if (startMs !== undefined && endMs !== undefined && (selection.startIndex > 0 || selection.endIndex < displayedData.length - 1)) {
+                    if (detailTimerRef.current !== null) window.clearTimeout(detailTimerRef.current);
+                    detailTimerRef.current = window.setTimeout(() => void loadDetailedWindow(startMs, endMs), 180);
+                  }
+                }
               }} />
             </LineChart>
           </ResponsiveContainer>
         ) : <div className="empty-chart">{translate(language, "emptyChart")}</div>}
-        {data.length ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { setZoom(zoomFromSelection(selection, range, currentXDomain, currentYDomain, logScale)); setZoomMode(false); }} /> : null}
+        {displayedData.length ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { const nextZoom = zoomFromSelection(selection, range, currentXDomain, currentYDomain, logScale); setZoom(nextZoom); setZoomMode(false); void loadDetailedWindow(nextZoom.xMin, nextZoom.xMax); }} /> : null}
       </div>
       <div className="plot-control-bar">
         <div className="chart-controls">
-          <RangeSelector range={range} setRange={(nextRange) => { setRange(nextRange); setZoom(null); setBrushRange(null); }} language={language} />
-          <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); setZoom(null); setBrushRange(null); }} language={language} />
-          <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom)} reset={() => setZoom(null)} language={language} />
+          <RangeSelector range={range} setRange={(nextRange) => { setRange(nextRange); resetDataZoom(); }} language={language} />
+          <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); resetDataZoom(); }} language={language} />
+          <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom || detailWindow)} reset={resetDataZoom} language={language} />
+          {detailLoading ? <span className="chart-hint">…</span> : null}
           {allowLogScale ? (
-            <button type="button" className={`scale-toggle ${logScale ? "active" : ""}`} onClick={() => { setLogScale((value) => !value); setZoom(null); }} aria-pressed={logScale}>
+            <button type="button" className={`scale-toggle ${logScale ? "active" : ""}`} onClick={() => { setLogScale((value) => !value); resetDataZoom(); }} aria-pressed={logScale}>
               {translate(language, "logScale")}
             </button>
           ) : null}
@@ -1623,6 +1705,7 @@ function CompactWeatherChart({
   timeZone,
   forecast,
   showForecast,
+  showForecastHistory,
   showReference,
 }: {
   channels: Channel[];
@@ -1633,21 +1716,28 @@ function CompactWeatherChart({
   timeZone: DisplayTimeZone;
   forecast: WeatherForecast | null;
   showForecast: boolean;
+  showForecastHistory: boolean;
   showReference: boolean;
 }) {
   const [selectedIds, setSelectedIds] = useState(() => channels.map((channel) => channel.id));
   const [displayStatistic, setDisplayStatistic] = useState<DisplayStatistic>("value");
   const [zoomMode, setZoomMode] = useState(false);
   const [zoom, setZoom] = useState<ZoomDomain | null>(null);
+  const [detailPoints, setDetailPoints] = useState<Record<string, ChannelPoint[]>>({});
+  const [detailWindow, setDetailWindow] = useState<[number, number] | null>(null);
+  const detailRequestRef = useRef(0);
   const hoverPointer = useMemo(() => createHoverPointerStore(), []);
   const activeZoom = zoom?.range === range ? zoom : null;
+  const chartChannels = useMemo(() => channels.map((channel) => detailPoints[channel.id]
+    ? { ...channel, points: detailPoints[channel.id] }
+    : channel), [channels, detailPoints]);
   const data = useMemo(() => {
-    const base = mergeChartData(channels, selectedIds, range, latestGlobalMs, undefined, false, 2400, displayStatistic);
+    const base = mergeChartData(chartChannels, selectedIds, range, latestGlobalMs, undefined, false, 2400, displayStatistic);
     const rows = new Map<number, ChartDatum>(base.map((row) => [row.timeMs, { ...row }]));
     const duration = timeRangeDurations[range];
     const minimum = duration ? latestGlobalMs - duration : Number.NEGATIVE_INFINITY;
     if (showReference) {
-      for (const channel of channels.filter((item) => selectedIds.includes(item.id) && !item.id.includes("wind"))) {
+      for (const channel of chartChannels.filter((item) => selectedIds.includes(item.id) && !item.id.includes("wind"))) {
         for (const [timeMs, band] of rmsEnvelope(channel, minimum, latestGlobalMs, displayStatistic)) {
           const row = rows.get(timeMs) ?? { timeMs };
           row[`band_${channel.id}`] = band;
@@ -1661,7 +1751,7 @@ function CompactWeatherChart({
       for (const point of forecast.points) {
         if (point.timeMs <= latestGlobalMs || point.timeMs > maximumForecastMs) continue;
         const row = rows.get(point.timeMs) ?? { timeMs: point.timeMs };
-        for (const channel of channels.filter((item) => selectedIds.includes(item.id))) {
+        for (const channel of chartChannels.filter((item) => selectedIds.includes(item.id))) {
           const field = forecastFields[channel.id];
           const value = field ? point[field] : null;
           if (typeof value === "number" && Number.isFinite(value)) {
@@ -1672,25 +1762,74 @@ function CompactWeatherChart({
         rows.set(point.timeMs, row);
       }
     }
+    if (showForecastHistory && forecast?.history?.length) {
+      // Keep the overlay deliberately bounded: archived runs are hourly and a
+      // full cooldown may contain years of forecasts. The latest 24 runs are
+      // enough to compare forecast drift without turning the chart into a
+      // second data explorer.
+      const historyRuns = forecast.history.slice(-24);
+      for (const run of historyRuns) {
+        for (const point of run.points) {
+          if (point.timeMs < minimum || point.timeMs > latestGlobalMs) continue;
+          const row = rows.get(point.timeMs) ?? { timeMs: point.timeMs };
+          for (const channel of chartChannels.filter((item) => selectedIds.includes(item.id))) {
+            const field = forecastFields[channel.id];
+            const value = field ? point[field] : null;
+            if (typeof value === "number" && Number.isFinite(value)) {
+              row[`forecast_history_${channel.id}_${run.generatedAtMs}`] = value;
+            }
+          }
+          rows.set(point.timeMs, row);
+        }
+      }
+    }
     return [...rows.values()].sort((a, b) => a.timeMs - b.timeMs);
-  }, [channels, displayStatistic, selectedIds, range, latestGlobalMs, forecast, showForecast, showReference]);
-  const zoomKeys = selectedIds.flatMap((id) => [id, ...(showReference ? [`band_${id}`] : []), ...(showForecast ? [`forecast_${id}`] : [])]);
+  }, [channels, chartChannels, displayStatistic, selectedIds, range, latestGlobalMs, forecast, showForecast, showForecastHistory, showReference]);
+  const displayedData = detailWindow
+    ? data.filter((row) => row.timeMs >= detailWindow[0] && row.timeMs <= detailWindow[1])
+    : data;
+  const historyKeys = showForecastHistory
+    ? (forecast?.history ?? []).slice(-24).flatMap((run) => selectedIds.map((id) => `forecast_history_${id}_${run.generatedAtMs}`))
+    : [];
+  const zoomKeys = selectedIds.flatMap((id) => [id, ...(showReference ? [`band_${id}`] : []), ...(showForecast ? [`forecast_${id}`] : [])]).concat(historyKeys);
   const currentXDomain: [number, number] = activeZoom
     ? [activeZoom.xMin, activeZoom.xMax]
-    : [data[0]?.timeMs ?? 0, data.at(-1)?.timeMs ?? 1];
-  const currentYDomain: [number, number] = activeZoom ? [activeZoom.yMin, activeZoom.yMax] : chartExtent(data, zoomKeys);
+    : detailWindow
+      ? detailWindow
+      : [displayedData[0]?.timeMs ?? 0, displayedData.at(-1)?.timeMs ?? 1];
+  const currentYDomain: [number, number] = activeZoom ? [activeZoom.yMin, activeZoom.yMax] : chartExtent(displayedData, zoomKeys);
   const visibleSpanMs = Math.max(1, currentXDomain[1] - currentXDomain[0]);
-  const hoverCurves = useMemo(() => channels.flatMap((channel) => {
+  const hoverCurves = useMemo(() => chartChannels.flatMap((channel) => {
     if (!selectedIds.includes(channel.id)) return [];
     const measuredLabel = `${channelName(channel, language)}${displayStatistic === "value" ? "" : ` · ${statisticLabel(displayStatistic, language)}`}`;
-    const curves = [makeHoverCurve(data, channel.id, measuredLabel, channel.unit, channel.color)];
-    if (showForecast && forecastFields[channel.id]) curves.push(makeHoverCurve(data, `forecast_${channel.id}`, `${channelName(channel, language)} · ${translate(language, "forecast")}`, channel.unit, channel.color));
+    const curves = [makeHoverCurve(displayedData, channel.id, measuredLabel, channel.unit, channel.color)];
+    if (showForecast && forecastFields[channel.id]) curves.push(makeHoverCurve(displayedData, `forecast_${channel.id}`, `${channelName(channel, language)} · ${translate(language, "forecast")}`, channel.unit, channel.color));
     return curves;
-  }), [channels, data, displayStatistic, language, selectedIds, showForecast]);
+  }), [chartChannels, displayStatistic, displayedData, language, selectedIds, showForecast]);
+
+  async function loadDetailedWindow(startMs: number, endMs: number) {
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return;
+    const requestId = ++detailRequestRef.current;
+    setDetailWindow([startMs, endMs]);
+    setDetailPoints({});
+    try {
+      const response = await fetchDynamicChannelPoints(selectedIds, startMs, endMs, displayStatistic, 2400);
+      if (requestId === detailRequestRef.current) setDetailPoints(response.points);
+    } catch {
+      if (requestId === detailRequestRef.current) setDetailPoints({});
+    }
+  }
+
+  function resetDataZoom() {
+    detailRequestRef.current += 1;
+    setDetailPoints({});
+    setDetailWindow(null);
+    setZoom(null);
+  }
 
   function toggleChannel(id: string) {
     setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
-    setZoom(null);
+    resetDataZoom();
   }
 
   return (
@@ -1714,9 +1853,9 @@ function CompactWeatherChart({
         })}
       </div>
       <div className="weather-chart-canvas">
-        {data.length && selectedIds.length ? <ResponsiveContainer width="100%" height="100%"><LineChart data={data} margin={{ top: 8, right: 12, left: 2, bottom: 2 }} onMouseMove={(state) => hoverPointer.set(state.activeCoordinate ?? null)} onMouseLeave={() => hoverPointer.set(null)}>
+        {displayedData.length && selectedIds.length ? <ResponsiveContainer width="100%" height="100%"><LineChart data={displayedData} margin={{ top: 8, right: 12, left: 2, bottom: 2 }} onMouseMove={(state) => hoverPointer.set(state.activeCoordinate ?? null)} onMouseLeave={() => hoverPointer.set(null)}>
           <CartesianGrid stroke="rgba(148, 163, 184, 0.1)" vertical={false} />
-          <XAxis dataKey="timeMs" type="number" scale="time" domain={activeZoom ? [activeZoom.xMin, activeZoom.xMax] : ["dataMin", "dataMax"]} allowDataOverflow={Boolean(activeZoom)} tickFormatter={(value) => formatCompactDate(value, language, visibleSpanMs, timeZone)} stroke="#66758a" tick={{ fill: "#9aa8bb", fontSize: 10 }} minTickGap={38} />
+          <XAxis dataKey="timeMs" type="number" scale="time" domain={activeZoom ? [activeZoom.xMin, activeZoom.xMax] : detailWindow ?? ["dataMin", "dataMax"]} allowDataOverflow={Boolean(activeZoom || detailWindow)} tickFormatter={(value) => formatCompactDate(value, language, visibleSpanMs, timeZone)} stroke="#66758a" tick={{ fill: "#9aa8bb", fontSize: 10 }} minTickGap={38} />
           <YAxis width={55} unit={` ${channels[0]?.unit ?? ""}`} tickFormatter={(value) => formatAxisTick(value, language)} stroke="#66758a" tick={{ fill: "#9aa8bb", fontSize: 10 }} domain={currentYDomain} allowDataOverflow />
           <DayBoundaryLines domain={currentXDomain} timeZone={timeZone} />
           <CryogenicPhaseLines events={events} domain={currentXDomain} language={language} />
@@ -1724,13 +1863,14 @@ function CompactWeatherChart({
           {channels.map((channel) => selectedIds.includes(channel.id) && showReference && !channel.id.includes("wind") ? <Area key={`band-${channel.id}`} type="monotone" dataKey={`band_${channel.id}`} name={`band_${channel.id}`} stroke="none" fill={channel.color} fillOpacity={0.15} connectNulls isAnimationActive={false} /> : null)}
           {channels.map((channel) => selectedIds.includes(channel.id) ? <Line key={channel.id} type="monotone" dataKey={channel.id} name={channel.id} stroke={channel.color} strokeWidth={2} dot={false} activeDot={false} connectNulls isAnimationActive={false} /> : null)}
           {channels.map((channel) => selectedIds.includes(channel.id) && showForecast && forecastFields[channel.id] ? <Line key={`forecast-${channel.id}`} type="monotone" dataKey={`forecast_${channel.id}`} name={`forecast_${channel.id}`} stroke={channel.color} strokeWidth={2} strokeDasharray="8 5" dot={false} activeDot={false} connectNulls isAnimationActive={false} /> : null)}
+          {showForecastHistory ? (forecast?.history ?? []).slice(-24).flatMap((run) => channels.map((channel) => selectedIds.includes(channel.id) && forecastFields[channel.id] ? <Line key={`forecast-history-${channel.id}-${run.generatedAtMs}`} type="monotone" dataKey={`forecast_history_${channel.id}_${run.generatedAtMs}`} name={`forecast_history_${channel.id}_${run.generatedAtMs}`} stroke={channel.color} strokeOpacity={0.24} strokeWidth={1} strokeDasharray="3 4" dot={false} activeDot={false} connectNulls isAnimationActive={false} /> : null)) : null}
         </LineChart></ResponsiveContainer> : <div className="empty-chart">{translate(language, "emptyChart")}</div>}
-        {data.length && selectedIds.length ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { setZoom(zoomFromSelection(selection, range, currentXDomain, currentYDomain)); setZoomMode(false); }} /> : null}
+        {displayedData.length && selectedIds.length ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { const nextZoom = zoomFromSelection(selection, range, currentXDomain, currentYDomain); setZoom(nextZoom); setZoomMode(false); void loadDetailedWindow(nextZoom.xMin, nextZoom.xMax); }} /> : null}
       </div>
       <div className="weather-plot-controls">
         <div className="chart-controls">
-          <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); setZoom(null); }} language={language} />
-          <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom)} reset={() => setZoom(null)} language={language} />
+          <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); resetDataZoom(); }} language={language} />
+          <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom || detailWindow)} reset={resetDataZoom} language={language} />
         </div>
       </div>
     </article>
@@ -1754,7 +1894,11 @@ function pairWindSamples(speedChannel?: Channel, directionChannel?: Channel) {
 function WindRoseChart({ speedChannel, directionChannel, range, latestGlobalMs, language }: { speedChannel?: Channel; directionChannel?: Channel; range: TimeRange; latestGlobalMs: number; language: Language }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [densityWindow, setDensityWindow] = useState<WindDensityWindow>("all");
-  const samples = useMemo(() => pairWindSamples(speedChannel, directionChannel), [speedChannel, directionChannel]);
+  const [detailPoints, setDetailPoints] = useState<Record<string, ChannelPoint[]>>({});
+  const detailRequestRef = useRef(0);
+  const detailedSpeedChannel = useMemo(() => speedChannel && detailPoints[speedChannel.id] ? { ...speedChannel, points: detailPoints[speedChannel.id] } : speedChannel, [speedChannel, detailPoints]);
+  const detailedDirectionChannel = useMemo(() => directionChannel && detailPoints[directionChannel.id] ? { ...directionChannel, points: detailPoints[directionChannel.id] } : directionChannel, [directionChannel, detailPoints]);
+  const samples = useMemo(() => pairWindSamples(detailedSpeedChannel, detailedDirectionChannel), [detailedSpeedChannel, detailedDirectionChannel]);
   const duration = timeRangeDurations[range];
   const recent = useMemo(() => samples.filter((sample) => !duration || sample.timeMs >= latestGlobalMs - duration), [samples, duration, latestGlobalMs]);
   const densitySamples = useMemo(() => {
@@ -1764,6 +1908,25 @@ function WindRoseChart({ speedChannel, directionChannel, range, latestGlobalMs, 
   }, [samples, densityWindow, latestGlobalMs]);
   const current = samples.at(-1);
   const densityLabel = translate(language, densityWindow === "24h" ? "last24hDensity" : densityWindow === "7d" ? "last7dDensity" : "fullCooldownDensity");
+
+  useEffect(() => {
+    if (!speedChannel || !directionChannel) return;
+    const availableStart = Math.min(speedChannel.firstMs || Infinity, directionChannel.firstMs || Infinity, speedChannel.points[0]?.[0] ?? Infinity, directionChannel.points[0]?.[0] ?? Infinity);
+    const startMs = densityWindow === "24h"
+      ? latestGlobalMs - 86_400_000
+      : densityWindow === "7d"
+        ? latestGlobalMs - 7 * 86_400_000
+        : availableStart;
+    if (!Number.isFinite(startMs) || latestGlobalMs <= startMs) return;
+    const requestId = ++detailRequestRef.current;
+    void fetchDynamicChannelPoints([speedChannel.id, directionChannel.id], startMs, latestGlobalMs, "value", densityWindow === "all" ? 6000 : 3000)
+      .then((response) => {
+        if (requestId === detailRequestRef.current) setDetailPoints(response.points);
+      })
+      .catch(() => {
+        if (requestId === detailRequestRef.current) setDetailPoints({});
+      });
+  }, [densityWindow, directionChannel, latestGlobalMs, speedChannel]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1915,6 +2078,7 @@ function WeatherPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSn
   const [forecast, setForecast] = useState<WeatherForecast | null>(null);
   const [forecastError, setForecastError] = useState(false);
   const [showForecast, setShowForecast] = useState(true);
+  const [showForecastHistory, setShowForecastHistory] = useState(false);
   const [showReference, setShowReference] = useState(false);
   useEffect(() => {
     let active = true;
@@ -1954,12 +2118,13 @@ function WeatherPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSn
       <div className="weather-global-controls weather-plot-toolbar">
         <RangeSelector range={range} setRange={setRange} language={language} />
         <button type="button" className={`scale-toggle ${showForecast ? "active" : ""}`} onClick={() => setShowForecast((value) => !value)} aria-pressed={showForecast}>{translate(language, "forecast")}</button>
+        <button type="button" className={`scale-toggle ${showForecastHistory ? "active" : ""}`} onClick={() => setShowForecastHistory((value) => !value)} aria-pressed={showForecastHistory} title={translate(language, "forecastHistoryCopy")}>{translate(language, "forecastHistory")}</button>
         <button type="button" className={`scale-toggle ${showReference ? "active" : ""}`} onClick={() => setShowReference((value) => !value)} aria-pressed={showReference} title={translate(language, "diurnalReferenceCopy")}>{translate(language, "diurnalReference")}</button>
       </div>
       <section className="weather-grid">
-        {standardGroups.map((channels) => <CompactWeatherChart key={channels.map((channel) => channel.id).join("-")} channels={channels} events={snapshot.events} range={range} latestGlobalMs={snapshot.latestGlobalMs} language={language} timeZone={timeZone} forecast={forecast} showForecast={showForecast} showReference={showReference} />)}
+        {standardGroups.map((channels) => <CompactWeatherChart key={channels.map((channel) => channel.id).join("-")} channels={channels} events={snapshot.events} range={range} latestGlobalMs={snapshot.latestGlobalMs} language={language} timeZone={timeZone} forecast={forecast} showForecast={showForecast} showForecastHistory={showForecastHistory} showReference={showReference} />)}
         <div className="weather-wind-row">
-          {windGroups.map((channels) => <CompactWeatherChart key={channels.map((channel) => channel.id).join("-")} channels={channels} events={snapshot.events} range={range} latestGlobalMs={snapshot.latestGlobalMs} language={language} timeZone={timeZone} forecast={forecast} showForecast={showForecast} showReference={showReference} />)}
+          {windGroups.map((channels) => <CompactWeatherChart key={channels.map((channel) => channel.id).join("-")} channels={channels} events={snapshot.events} range={range} latestGlobalMs={snapshot.latestGlobalMs} language={language} timeZone={timeZone} forecast={forecast} showForecast={showForecast} showForecastHistory={showForecastHistory} showReference={showReference} />)}
         </div>
         <WindRoseChart speedChannel={speedChannel} directionChannel={directionChannel} range={range} latestGlobalMs={snapshot.latestGlobalMs} language={language} />
       </section>

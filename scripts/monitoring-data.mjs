@@ -35,6 +35,9 @@ const analysisResultsPath = join(localDirectory, "analysis-results.json");
 const storageBucketMs = 30_000;
 const fridgePeakBucketMs = 10 * 60_000;
 const peakPreservingChannelIds = new Set(["avs47_1_ch4", "avs47_1_ch6"]);
+const forecastRefreshIntervalMs = 6 * 3_600_000;
+const forecastRetentionMs = 3 * 365 * 86_400_000;
+const qubicSite = { latitude: -24.186971, longitude: -66.478209, elevation: 4869 };
 
 const cooldown = {
   id: cooldownId,
@@ -267,6 +270,28 @@ function initializeDatabase(database) {
     CREATE INDEX IF NOT EXISTS idx_aggregates_channel_time
     ON aggregates(channel_id, bucket_ms);
 
+    CREATE TABLE IF NOT EXISTS weather_forecast_runs (
+      fetched_at_ms INTEGER PRIMARY KEY,
+      source TEXT NOT NULL,
+      latitude REAL NOT NULL,
+      longitude REAL NOT NULL,
+      elevation REAL NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS weather_forecast_points (
+      fetched_at_ms INTEGER NOT NULL,
+      time_ms INTEGER NOT NULL,
+      temperature REAL,
+      humidity REAL,
+      pressure REAL,
+      wind_speed REAL,
+      wind_direction REAL,
+      PRIMARY KEY (fetched_at_ms, time_ms)
+    ) WITHOUT ROWID;
+
+    CREATE INDEX IF NOT EXISTS idx_weather_forecast_time
+    ON weather_forecast_points(time_ms, fetched_at_ms);
+
     CREATE TABLE IF NOT EXISTS ingestion_state (
       source_id TEXT PRIMARY KEY,
       source_generation INTEGER NOT NULL DEFAULT 0,
@@ -483,6 +508,70 @@ function runPythonAnalysis() {
   }
 }
 
+async function maybeStoreWeatherForecast(database) {
+  const previous = database.prepare("SELECT MAX(fetched_at_ms) AS fetchedAtMs FROM weather_forecast_runs").get();
+  const previousMs = Number(previous?.fetchedAtMs ?? 0);
+  if (previousMs && Date.now() - previousMs < forecastRefreshIntervalMs) {
+    return { status: "not due", fetchedAtMs: previousMs };
+  }
+
+  const parameters = new URLSearchParams({
+    latitude: String(qubicSite.latitude),
+    longitude: String(qubicSite.longitude),
+    elevation: String(qubicSite.elevation),
+    hourly: "temperature_2m,relative_humidity_2m,surface_pressure,wind_speed_10m,wind_direction_10m",
+    forecast_days: "16",
+    timeformat: "unixtime",
+    timezone: "UTC",
+    wind_speed_unit: "kmh",
+  });
+
+  try {
+    const response = await fetch(`https://api.open-meteo.com/v1/forecast?${parameters}`, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) return { status: "unavailable", fetchedAtMs: previousMs };
+    const payload = await response.json();
+    const hourly = payload?.hourly;
+    if (!Array.isArray(hourly?.time)) return { status: "unavailable", fetchedAtMs: previousMs };
+
+    const fetchedAtMs = Date.now();
+    const insertRun = database.prepare("INSERT INTO weather_forecast_runs (fetched_at_ms, source, latitude, longitude, elevation) VALUES (?, ?, ?, ?, ?)");
+    const insertPoint = database.prepare(`
+      INSERT INTO weather_forecast_points (fetched_at_ms, time_ms, temperature, humidity, pressure, wind_speed, wind_direction)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    database.exec("BEGIN");
+    try {
+      insertRun.run(fetchedAtMs, "Open-Meteo", qubicSite.latitude, qubicSite.longitude, qubicSite.elevation);
+      for (let index = 0; index < hourly.time.length; index += 1) {
+        const numberOrNull = (values) => Number.isFinite(Number(values?.[index])) ? Number(values[index]) : null;
+        insertPoint.run(
+          fetchedAtMs,
+          Number(hourly.time[index]) * 1000,
+          numberOrNull(hourly.temperature_2m),
+          numberOrNull(hourly.relative_humidity_2m),
+          numberOrNull(hourly.surface_pressure),
+          numberOrNull(hourly.wind_speed_10m),
+          numberOrNull(hourly.wind_direction_10m),
+        );
+      }
+      const cutoffMs = fetchedAtMs - forecastRetentionMs;
+      database.prepare("DELETE FROM weather_forecast_points WHERE fetched_at_ms < ?").run(cutoffMs);
+      database.prepare("DELETE FROM weather_forecast_runs WHERE fetched_at_ms < ?").run(cutoffMs);
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+    return { status: "stored", fetchedAtMs, pointCount: hourly.time.length };
+  } catch (error) {
+    console.warn(`Weather forecast archive unavailable: ${error.message}`);
+    return { status: "unavailable", fetchedAtMs: previousMs };
+  }
+}
+
 function exportSnapshot(database, analysis) {
   const generatedAtMs = Date.now();
   const latestGlobalMs = Number(database.prepare("SELECT MAX(last_at_ms) AS latestMs FROM aggregates WHERE sample_count > 0").get().latestMs ?? 0);
@@ -610,10 +699,11 @@ export async function refreshMonitoringData() {
   const results = [];
   try {
     for (const source of sourceDefinitions) results.push(await ingestSource(database, source));
+    const forecast = await maybeStoreWeatherForecast(database);
     const analysis = runPythonAnalysis();
     const snapshot = exportSnapshot(database, analysis);
     database.exec("PRAGMA optimize");
-    return { databasePath, snapshotPath, results, snapshot };
+    return { databasePath, snapshotPath, results, snapshot, forecast };
   } finally {
     database.close();
   }
@@ -626,4 +716,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   }
   console.log(`Database: ${result.databasePath}`);
   console.log(`Snapshot: ${result.snapshotPath}`);
+  if (result.forecast?.status === "stored") console.log(`Weather forecast archive: stored ${result.forecast.pointCount} hourly point(s)`);
 }

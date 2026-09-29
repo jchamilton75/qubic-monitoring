@@ -1,3 +1,7 @@
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+
 type OpenMeteoResponse = {
   hourly?: {
     time?: number[];
@@ -14,6 +18,56 @@ const qubicSite = {
   longitude: -66.478209,
   elevation: 4869,
 };
+
+function cooldownId(sourceDirectoryName: string) {
+  return sourceDirectoryName
+    .replace(/([a-z])([A-Z])/g, "$1-$2")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .toLowerCase();
+}
+
+function readForecastHistory() {
+  const sourceDirectoryName = process.env.QUBIC_COOLDOWN_DIR ?? "June2026";
+  const path = join(resolve(process.cwd()), ".local", `qubic-monitoring-${cooldownId(sourceDirectoryName)}-v2.sqlite`);
+  if (!existsSync(path)) return [];
+  let database: DatabaseSync | undefined;
+  try {
+    database = new DatabaseSync(path, { readOnly: true });
+    const runs = database.prepare(`
+      SELECT fetched_at_ms AS fetchedAtMs
+      FROM weather_forecast_runs
+      WHERE fetched_at_ms <= ?
+      ORDER BY fetched_at_ms DESC
+      LIMIT 96
+    `).all(Date.now()) as Array<{ fetchedAtMs: number }>;
+    if (!runs.length) return [];
+    const placeholders = runs.map(() => "?").join(",");
+    const points = database.prepare(`
+      SELECT fetched_at_ms AS fetchedAtMs, time_ms AS timeMs,
+        temperature, humidity, pressure, wind_speed AS windSpeed, wind_direction AS windDirection
+      FROM weather_forecast_points
+      WHERE fetched_at_ms IN (${placeholders})
+      ORDER BY fetched_at_ms, time_ms
+    `).all(...runs.map((run) => run.fetchedAtMs)) as Array<Record<string, number | null>>;
+    const byRun = new Map(runs.map((run) => [Number(run.fetchedAtMs), [] as Array<Record<string, number | null>>]));
+    for (const point of points) byRun.get(Number(point.fetchedAtMs))?.push(point);
+    return [...byRun.entries()].sort((left, right) => left[0] - right[0]).map(([fetchedAtMs, runPoints]) => ({
+      generatedAtMs: fetchedAtMs,
+      points: runPoints.map((point) => ({
+        timeMs: point.timeMs,
+        temperature: point.temperature,
+        humidity: point.humidity,
+        pressure: point.pressure,
+        windSpeed: point.windSpeed,
+        windDirection: point.windDirection,
+      })),
+    }));
+  } catch {
+    return [];
+  } finally {
+    database?.close();
+  }
+}
 
 export async function GET() {
   const parameters = new URLSearchParams({
@@ -50,6 +104,7 @@ export async function GET() {
       source: "Open-Meteo",
       site: qubicSite,
       points,
+      history: readForecastHistory(),
     }, {
       headers: { "Cache-Control": "public, max-age=900, stale-while-revalidate=1800" },
     });
