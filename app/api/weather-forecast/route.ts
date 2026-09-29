@@ -2,6 +2,8 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
+export const runtime = "nodejs";
+
 type OpenMeteoResponse = {
   hourly?: {
     time?: number[];
@@ -26,9 +28,13 @@ function cooldownId(sourceDirectoryName: string) {
     .toLowerCase();
 }
 
+function projectDirectory() {
+  return resolve(process.env.QUBIC_PROJECT_DIR ?? process.env.INIT_CWD ?? process.env.npm_config_local_prefix ?? process.cwd());
+}
+
 function readForecastHistory() {
   const sourceDirectoryName = process.env.QUBIC_COOLDOWN_DIR ?? "June2026";
-  const path = join(resolve(process.cwd()), ".local", `qubic-monitoring-${cooldownId(sourceDirectoryName)}-v2.sqlite`);
+  const path = join(projectDirectory(), ".local", `qubic-monitoring-${cooldownId(sourceDirectoryName)}-v2.sqlite`);
   if (!existsSync(path)) return [];
   let database: DatabaseSync | undefined;
   try {

@@ -2,9 +2,17 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-const projectDirectory = resolve(process.cwd());
+export const runtime = "nodejs";
+
 const allowedStatistics = new Set(["value", "min", "max"]);
 const peakChannels = new Set(["avs47_1_ch0", "avs47_1_ch4", "avs47_1_ch6"]);
+
+// Vinext's local worker runs with `/bundle` as its cwd. npm still exposes the
+// actual project root, so prefer those stable paths and keep an explicit
+// override for systemd deployments.
+function projectDirectory() {
+  return resolve(process.env.QUBIC_PROJECT_DIR ?? process.env.INIT_CWD ?? process.env.npm_config_local_prefix ?? process.cwd());
+}
 
 function cooldownId(sourceDirectoryName: string) {
   return sourceDirectoryName
@@ -15,7 +23,7 @@ function cooldownId(sourceDirectoryName: string) {
 
 function databasePath() {
   const sourceDirectoryName = process.env.QUBIC_COOLDOWN_DIR ?? "June2026";
-  return join(projectDirectory, ".local", `qubic-monitoring-${cooldownId(sourceDirectoryName)}-v2.sqlite`);
+  return join(projectDirectory(), ".local", `qubic-monitoring-${cooldownId(sourceDirectoryName)}-v2.sqlite`);
 }
 
 export async function GET(request: Request) {
