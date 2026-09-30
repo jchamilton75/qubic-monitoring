@@ -14,6 +14,41 @@ watcher_pid=""
 server_pid=""
 cleanup_done=0
 
+usage() {
+  printf 'Usage: npm run monitor -- [--port PORT]\n' >&2
+}
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --port)
+      if [[ "$#" -lt 2 ]]; then
+        usage
+        exit 2
+      fi
+      port="$2"
+      shift 2
+      ;;
+    --port=*)
+      port="${1#*=}"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf 'Unknown option: %s\n' "$1" >&2
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+if ! [[ "${port}" =~ ^[0-9]{1,5}$ ]] || (( port < 1 || port > 65535 )); then
+  printf 'Invalid port: %s\n' "${port}" >&2
+  exit 2
+fi
+
 mkdir -p "${run_directory}"
 
 stop_pid() {

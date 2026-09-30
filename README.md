@@ -56,8 +56,8 @@ npm run monitor
 This is the complete local launcher: it stops previous instances belonging to
 this checkout, runs `data:update`, rebuilds the application, starts the
 watcher, and finally starts the production server. It keeps the terminal
-attached so `Ctrl-C` stops both processes cleanly. Use `QUBIC_LOCAL_PORT=3001`
-if port 3000 is already reserved.
+attached so `Ctrl-C` stops both processes cleanly. If port 3000 is already
+reserved, use `npm run monitor -- --port 3001`.
 
 The collector refreshes continuously (120 seconds by default) and the browser
 checks for a new snapshot every 30 seconds. Set `QUBIC_REFRESH_SECONDS` to tune
@@ -137,7 +137,7 @@ npm run dev
 
 This development-only command does not run the collector; for a complete local
 test use `npm run monitor`. Then open `http://localhost:3000/` (or the port
-selected with `QUBIC_LOCAL_PORT`).
+selected with `--port`).
 
 ## Verify the build
 
