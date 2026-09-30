@@ -94,6 +94,18 @@ type MonitoringSnapshot = {
   };
 };
 
+type SyncStatus = {
+  status: "success" | "failed" | "unknown";
+  lastAttemptAtMs: number | null;
+  lastSuccessAtMs: number | null;
+  error?: string | null;
+};
+
+type RuntimeInfo = {
+  serverName: string;
+  platform?: string;
+};
+
 type ForecastPoint = {
   timeMs: number;
   temperature: number | null;
@@ -337,11 +349,19 @@ const messages: Record<Language, Record<string, string>> = {
     comparisonEmpty: "The current cooldown is ready. Historical curves will be added incrementally and will never be reread for every display.",
     acquisitionQuality: "Acquisition quality",
     perChannelFreshness: "Per-channel freshness",
-    sourceCopy: "The displayed date comes from the latest valid measurement in each file.",
+    sourceCopy: "Each source is shown with its last data timestamp and the last successful download timestamp.",
+    sourceStatusOk: "Data source status: OK",
+    sourceStatusProblem: "Data source diagnostic",
+    lastDataOnFile: "Last data on file: {date}",
+    lastSuccessfulDownload: "Last successful file download: {age}",
+    lastDownloadFailed: "Last file download failed at {date}",
+    downloadStatusUnavailable: "Download status unavailable",
+    downloadDataLag: "The files were downloaded {age}, but their newest valid measurement is {date}.",
+    noSuccessfulDownload: "No successful file download has been recorded yet.",
     importedSources: "imported sources",
     tableChannel: "Channel",
     tableStatus: "Status",
-    tableLatest: "Latest measurement",
+    tableLatest: "Data on file / download",
     tableValue: "Value",
     tableSamples: "Samples",
     tableQuality: "Quality",
@@ -370,6 +390,7 @@ const messages: Record<Language, Record<string, string>> = {
     threeSiteCameras: "3 site cameras",
     navigation: "Main navigation",
     timezone: "Time zone",
+    runtimeServer: "Server",
     displayedCooldown: "Displayed cooldown",
     currentCooldown: "Current cooldown",
     latestGlobal: "Latest global point",
@@ -437,7 +458,7 @@ const messages: Record<Language, Record<string, string>> = {
     "range.all": "Tout", "status.fresh": "À jour", "status.delayed": "En retard", "status.stale": "Ancien", "status.missing": "Absent",
     notAvailable: "Non disponible", neverReceived: "jamais reçu", ageMinutes: "il y a {count} min", ageHours: "il y a {count} h", ageDays: "il y a {count} j",
     loading: "Lecture de l’instrument…", loadError: "Les données locales ne sont pas encore disponibles.", loadErrorHelp: "Actualisez l’importeur puis rechargez cette page.",
-    warningTitle: "Flux de télémétrie partiel", warningBody: "{count} source(s) sans donnée récente — les courbes ne sont jamais prolongées au-delà de leur dernière mesure.",
+    warningTitle: "Flux de télémétrie partiel", warningBody: "{count} source(s) sans donnée récente — les courbes ne sont jamais prolongées au-delà de leur dernière mesure.", sourceStatusOk: "État des sources : OK", sourceStatusProblem: "Diagnostic des sources", lastDataOnFile: "Dernières données du fichier : {date}", lastSuccessfulDownload: "Dernier téléchargement réussi : {age}", lastDownloadFailed: "Dernier téléchargement échoué le {date}", downloadStatusUnavailable: "État du téléchargement indisponible", downloadDataLag: "Les fichiers ont été téléchargés {age}, mais leur dernière mesure valide date du {date}.", noSuccessfulDownload: "Aucun téléchargement réussi n’a encore été enregistré.",
     mainTemperatures: "Températures principales", cryogenicEvolution: "Évolution cryogénique", chartCopy: "Agrégats par canal. Chaque source conserve sa propre chronologie et fraîcheur.",
     temperaturesCopy: "Tous les canaux de température de l’instrument. Sélectionnez-les par leur nom humain et leur identifiant de fichier.", pressureTitle: "Pression du cryostat", pressureCopy: "Vue logarithmique dédiée à la pression du vide.", touchTitle: "Signal Touch aligné sur l’étage 1 K", touchCopy: "Le Touch utilise le maximum de chaque paquet de rééchantillonnage puis une normalisation logarithmique afin de conserver les ouvertures brèves du switch thermique mécanique. Les deux signaux sont normalisés indépendamment et le graphique s’arrête 24 heures après la fin du refroidissement principal.", touchBucketMaximum: "maximum du paquet", fridgeBucketMaximum: "maximum sur 10 min", mhsOperations: "Ouvertures/fermetures MHS détectées", mhsOperationsCopy: "Détection automatique pendant le refroidissement principal. Sélectionnez une manœuvre pour l’examiner.", mhsOperation: "MHS {count}", mhsPeak: "pic {value}", backToTouchOverview: "Revenir à la vue Touch complète", normalizedSignal: "Signal normalisé", compressorTitle: "Compresseurs des tubes pulsés", compressorCopy: "Températures hélium, entrée et sortie, pression d’entrée et état des deux compresseurs.", weatherTitle: "Météo à Alto Chorrillos", weatherCopy: "Conditions extérieures et intérieures, pression atmosphérique, vitesse et direction du vent.", selectAll: "Tout sélectionner", clearSelection: "Effacer", online: "En ligne", offline: "Hors ligne",
     timeWindow: "Fenêtre temporelle", boxZoom: "Zoom rectangle", dragToZoom: "Tracez un rectangle sur la courbe pour zoomer sur les deux axes", resetZoom: "Réinitialiser le zoom", yAxis: "Axe Y", yMinimum: "Minimum", yMaximum: "Maximum", displayMode: "Statistique affichée", displayValue: "Valeur", displayMinimum: "Minimum", displayMaximum: "Maximum", autoScale: "Auto", logScale: "Échelle log", visibleChannels: "Canaux visibles", emptyChart: "Aucun canal visible dans cette période.", chartHint: "Utilisez la bande inférieure pour zoomer et vous déplacer dans le temps.",
@@ -447,8 +468,8 @@ const messages: Record<Language, Record<string, string>> = {
     phase1Title: "Refroidissement principal", phase1Copy: "Le repère 260 K a été détecté sur la descente de l’étage 1 K.", phase2Title: "Stabilité 4 K", phase2Copy: "En attente d’un flux 4 K récent pour confirmer le seuil et sa durée.", phase3Title: "Cyclages sub-K", phase3Copy: "La structure est prête à segmenter et comparer les prochains cycles.",
     nextCapability: "Prochaine capacité", cycleReferenceTitle: "Cycle courant vs référence", cycleReferenceCopy: "Moyenne, RMS, médiane et percentiles seront calculés après validation des événements de début et de fin de cycle.", referenceBand: "Référence ± dispersion",
     comparisonLab: "Laboratoire de comparaison", comparisonTitle: "Recaler les cooldowns sur un même événement", timeMarker: "Repère temporel", crossing260: "Passage descendant à 260 K", stable4K: "Étage 4 K stable — validation en attente", cycleStart: "Début de cyclage sub-K — phase 2", cooldowns: "Cooldowns", current: "Courant", toImport: "À importer", selectedCooldowns: "{count} cooldown(s) sélectionné(s)", comparisonEmpty: "Le cooldown courant est prêt. Les courbes historiques seront ajoutées progressivement et ne seront jamais relues à chaque affichage.",
-    acquisitionQuality: "Qualité des acquisitions", perChannelFreshness: "Fraîcheur canal par canal", sourceCopy: "La date affichée provient de la dernière mesure valide de chaque fichier.", importedSources: "sources importées", tableChannel: "Canal", tableStatus: "État", tableLatest: "Dernière mesure", initialStartup: "Mise en route initiale", tableValue: "Valeur", tableSamples: "Échantillons", tableQuality: "Qualité", valid: "Valide", suspect: "{count} suspectes",
-    webcams: "Webcams QUBIC", webcamsLater: "Vues en direct d’Alto Chorrillos", webcamsTitle: "Webcams de l’observatoire QUBIC", webcamsCopy: "Images en direct relayées de manière sécurisée depuis les trois caméras du site. Les identifiants restent sur le serveur de monitoring.", cameraLive: "En direct", cameraUnavailable: "Caméra temporairement indisponible", camera1: "Caméra 1", camera2: "Caméra 2", camera3: "Caméra 3", enlarge: "Agrandir", captureImage: "Capturer une image", recordVideo: "Enregistrer une vidéo", stopRecording: "Arrêter l’enregistrement", recording: "Enregistrement", recordingLimit: "Enregistrement accéléré · 1 image/s · 30 s maximum", videoUnsupported: "L’enregistrement vidéo n’est pas disponible dans ce navigateur", captureFailed: "Échec de la capture", housekeepingTitle: "Housekeeping", housekeepingCopy: "Choisissez ci-dessous la famille de télémétrie à afficher.", availableChannels: "{count} canaux disponibles", threeSiteCameras: "3 caméras du site", navigation: "Navigation principale", timezone: "Fuseau", displayedCooldown: "Cooldown affiché", currentCooldown: "Cooldown courant", latestGlobal: "Dernier point global", heroTitle: "Vue en direct du cooldown actuel.", heroCopy: "Cette vue utilise le répertoire local du cooldown le plus récent. Chaque source conserve sa chronologie et son état de qualité.",
+    acquisitionQuality: "Qualité des acquisitions", perChannelFreshness: "Fraîcheur canal par canal", sourceCopy: "Chaque source affiche la date de ses dernières données et celle de son dernier téléchargement réussi.", importedSources: "sources importées", tableChannel: "Canal", tableStatus: "État", tableLatest: "Données du fichier / téléchargement", initialStartup: "Mise en route initiale", tableValue: "Valeur", tableSamples: "Échantillons", tableQuality: "Qualité", valid: "Valide", suspect: "{count} suspectes",
+    webcams: "Webcams QUBIC", webcamsLater: "Vues en direct d’Alto Chorrillos", webcamsTitle: "Webcams de l’observatoire QUBIC", webcamsCopy: "Images en direct relayées de manière sécurisée depuis les trois caméras du site. Les identifiants restent sur le serveur de monitoring.", cameraLive: "En direct", cameraUnavailable: "Caméra temporairement indisponible", camera1: "Caméra 1", camera2: "Caméra 2", camera3: "Caméra 3", enlarge: "Agrandir", captureImage: "Capturer une image", recordVideo: "Enregistrer une vidéo", stopRecording: "Arrêter l’enregistrement", recording: "Enregistrement", recordingLimit: "Enregistrement accéléré · 1 image/s · 30 s maximum", videoUnsupported: "L’enregistrement vidéo n’est pas disponible dans ce navigateur", captureFailed: "Échec de la capture", housekeepingTitle: "Housekeeping", housekeepingCopy: "Choisissez ci-dessous la famille de télémétrie à afficher.", availableChannels: "{count} canaux disponibles", threeSiteCameras: "3 caméras du site", navigation: "Navigation principale", timezone: "Fuseau", runtimeServer: "Serveur", displayedCooldown: "Cooldown affiché", currentCooldown: "Cooldown courant", latestGlobal: "Dernier point global", heroTitle: "Vue en direct du cooldown actuel.", heroCopy: "Cette vue utilise le répertoire local du cooldown le plus récent. Chaque source conserve sa chronologie et son état de qualité.",
     metric1K: "Étage 1 K", metric4K: "Filtres 4 K", metricPressure: "Pression cryostat", metricInside: "Température intérieure", snapshotGenerated: "Instantané local généré le {date}", automaticRefresh: "Actualisation automatique · sans recharger la page", phaseColdPartial: "Phase froide — flux partiel", phaseCooldown: "Refroidissement",
     observatoryAlt: "Observatoire QUBIC à Alto Chorrillos", daysBefore: "−2 jours", eventT0: "Événement t₀", daysAfter: "+12 jours",
     "channel.avs47_1_ch1": "Étage 1 K", "channel.avs47_1_ch4": "Tête froide frigo 1 K", "channel.avs47_1_ch6": "Tête froide frigo 300 mK", "channel.temperature06": "Filtres 4 K", "channel.pressure1": "Pression cryostat", "channel.inside_temperature": "Température intérieure", "channel.inside_humidity": "Humidité intérieure",
@@ -464,7 +485,7 @@ const messages: Record<Language, Record<string, string>> = {
     "eyebrow.overview": "Monitoreo", "eyebrow.cold": "Sub-K",
     "range.all": "Todo", "status.fresh": "Actualizado", "status.delayed": "Demorado", "status.stale": "Desactualizado", "status.missing": "Ausente",
     notAvailable: "No disponible", neverReceived: "nunca recibido", ageMinutes: "hace {count} min", ageHours: "hace {count} h", ageDays: "hace {count} d",
-    loading: "Leyendo el instrumento…", loadError: "Los datos locales todavía no están disponibles.", loadErrorHelp: "Actualizá el importador y volvé a cargar esta página.", warningTitle: "Flujo de telemetría parcial", warningBody: "{count} fuente(s) sin datos recientes — las curvas nunca se extienden más allá de su última medición.",
+    loading: "Leyendo el instrumento…", loadError: "Los datos locales todavía no están disponibles.", loadErrorHelp: "Actualizá el importador y volvé a cargar esta página.", warningTitle: "Flujo de telemetría parcial", warningBody: "{count} fuente(s) sin datos recientes — las curvas nunca se extienden más allá de su última medición.", sourceStatusOk: "Estado de las fuentes: OK", sourceStatusProblem: "Diagnóstico de las fuentes", lastDataOnFile: "Últimos datos en el archivo: {date}", lastSuccessfulDownload: "Última descarga correcta: {age}", lastDownloadFailed: "La última descarga falló el {date}", downloadStatusUnavailable: "Estado de descarga no disponible", downloadDataLag: "Los archivos se descargaron {age}, pero su última medición válida es del {date}.", noSuccessfulDownload: "Todavía no se registró ninguna descarga correcta.",
     mainTemperatures: "Temperaturas principales", cryogenicEvolution: "Evolución criogénica", chartCopy: "Agregados por canal. Cada fuente conserva su propia cronología y frescura.", timeWindow: "Ventana temporal", boxZoom: "Zoom rectangular", dragToZoom: "Arrastrá un rectángulo sobre la curva para ampliar ambos ejes", resetZoom: "Restablecer zoom", yAxis: "Eje Y", yMinimum: "Mínimo", yMaximum: "Máximo", displayMode: "Estadística mostrada", displayValue: "Valor", displayMinimum: "Mínimo", displayMaximum: "Máximo", autoScale: "Auto", logScale: "Escala log", visibleChannels: "Canales visibles", emptyChart: "No hay canales visibles en este período.", chartHint: "Usá la banda inferior para ampliar y recorrer el tiempo.",
     forecast: "Pronóstico", forecastUnavailable: "Pronóstico temporalmente no disponible", forecastSource: "Pronóstico Open-Meteo · coordenadas QUBIC y altitud 4.869 m", diurnalReference: "Envolvente RMS de 7 días", diurnalReferenceCopy: "Envolvente transparente ± RMS centrada en la curva actual y estimada con los 7 días anteriores", expectedPattern: "Envolvente RMS de 7 días", windRoseTitle: "Velocidad y dirección de llegada del viento", windRoseCopy: "El mapa de colores usa el período de densidad elegido; las muestras recientes se desvanecen con la antigüedad en la ventana temporal mostrada.", windFrom: "Viento desde {direction}", fullCooldownDensity: "Cooldown completo", last24hDensity: "Últimas 24 h", last7dDensity: "Últimos 7 días",
     temperaturesCopy: "Todos los canales de temperatura del instrumento, identificados por nombre humano y archivo fuente.", pressureTitle: "Presión del criostato", pressureCopy: "Vista logarítmica dedicada a la presión de vacío.", touchTitle: "Señal Touch alineada con la etapa de 1 K", touchCopy: "Touch usa el máximo de cada bloque de remuestreo y una normalización logarítmica para conservar las aperturas breves del interruptor térmico mecánico. Ambas señales se normalizan por separado y el gráfico termina 24 horas después del enfriamiento principal.", touchBucketMaximum: "máximo del bloque", fridgeBucketMaximum: "máximo en 10 min", mhsOperations: "Aperturas/cierres MHS detectados", mhsOperationsCopy: "Detección automática durante el enfriamiento principal. Seleccioná una maniobra para examinarla.", mhsOperation: "MHS {count}", mhsPeak: "pico {value}", backToTouchOverview: "Volver a la vista Touch completa", normalizedSignal: "Señal normalizada", compressorTitle: "Compresores de los tubos de pulso", compressorCopy: "Temperaturas, presión de entrada y estado de los dos compresores.", weatherTitle: "Tiempo en Alto Chorrillos", weatherCopy: "Condiciones exteriores e interiores, presión atmosférica, velocidad y dirección del viento.", selectAll: "Seleccionar todo", clearSelection: "Limpiar", online: "En línea", offline: "Fuera de línea",
@@ -472,8 +493,8 @@ const messages: Record<Language, Record<string, string>> = {
     subKSequence: "Secuencia sub-K", coldTitle: "La fase fría se convierte en un objeto de análisis dedicado.", coldCopy: "Comienza después de confirmar la estabilidad de la etapa de 4 K e incluye los ciclos de 1 K y 300 mK detectados mediante calentadores, MHS y temperaturas.", latest1K: "Última señal de 1 K",
     phase1Title: "Enfriamiento principal", phase1Copy: "El marcador de 260 K fue detectado en el descenso de la etapa de 1 K.", phase2Title: "Estabilidad de 4 K", phase2Copy: "Esperando un flujo reciente de 4 K para confirmar el umbral y su duración.", phase3Title: "Ciclos sub-K", phase3Copy: "La estructura está lista para segmentar y comparar los próximos ciclos.", nextCapability: "Próxima capacidad", cycleReferenceTitle: "Ciclo actual vs referencia", cycleReferenceCopy: "Media, RMS, mediana y percentiles se calcularán después de validar los eventos de inicio y fin de ciclo.", referenceBand: "Referencia ± dispersión",
     comparisonLab: "Laboratorio de comparación", comparisonTitle: "Alinear cooldowns sobre el mismo evento", timeMarker: "Referencia temporal", crossing260: "Cruce descendente a 260 K", stable4K: "Etapa de 4 K estable — pendiente", cycleStart: "Inicio del ciclo sub-K — fase 2", cooldowns: "Cooldowns", current: "Actual", toImport: "Por importar", selectedCooldowns: "{count} cooldown(s) seleccionado(s)", comparisonEmpty: "El cooldown actual está listo. Las curvas históricas se agregarán progresivamente y no se releerán en cada visualización.",
-    acquisitionQuality: "Calidad de adquisición", perChannelFreshness: "Frescura por canal", sourceCopy: "La fecha mostrada proviene de la última medición válida de cada archivo.", importedSources: "fuentes importadas", tableChannel: "Canal", tableStatus: "Estado", tableLatest: "Última medición", initialStartup: "Puesta en marcha inicial", tableValue: "Valor", tableSamples: "Muestras", tableQuality: "Calidad", valid: "Válido", suspect: "{count} sospechosas",
-    webcams: "Webcams QUBIC", webcamsLater: "Vistas en vivo desde Alto Chorrillos", webcamsTitle: "Webcams del observatorio QUBIC", webcamsCopy: "Imágenes en vivo retransmitidas de forma segura desde las tres cámaras del sitio. Las credenciales quedan en el servidor de monitoreo.", cameraLive: "En vivo", cameraUnavailable: "Cámara temporalmente no disponible", camera1: "Cámara 1", camera2: "Cámara 2", camera3: "Cámara 3", enlarge: "Ampliar", captureImage: "Capturar imagen", recordVideo: "Grabar video", stopRecording: "Detener grabación", recording: "Grabando", recordingLimit: "Grabación acelerada · 1 cuadro/s · máximo 30 s", videoUnsupported: "La grabación de video no está disponible en este navegador", captureFailed: "Falló la captura", housekeepingTitle: "Housekeeping", housekeepingCopy: "Elegí la familia de telemetría que querés ver abajo.", availableChannels: "{count} canales disponibles", threeSiteCameras: "3 cámaras del sitio", navigation: "Navegación principal", timezone: "Zona horaria", displayedCooldown: "Cooldown mostrado", currentCooldown: "Cooldown actual", latestGlobal: "Último punto global", heroTitle: "Vista en vivo del cooldown actual.", heroCopy: "Esta vista usa el directorio local del cooldown más reciente. Cada fuente conserva su cronología y estado de calidad.",
+    acquisitionQuality: "Calidad de adquisición", perChannelFreshness: "Frescura por canal", sourceCopy: "Cada fuente muestra la fecha de sus últimos datos y la de su última descarga correcta.", importedSources: "fuentes importadas", tableChannel: "Canal", tableStatus: "Estado", tableLatest: "Datos del archivo / descarga", initialStartup: "Puesta en marcha inicial", tableValue: "Valor", tableSamples: "Muestras", tableQuality: "Calidad", valid: "Válido", suspect: "{count} sospechosas",
+    webcams: "Webcams QUBIC", webcamsLater: "Vistas en vivo desde Alto Chorrillos", webcamsTitle: "Webcams del observatorio QUBIC", webcamsCopy: "Imágenes en vivo retransmitidas de forma segura desde las tres cámaras del sitio. Las credenciales quedan en el servidor de monitoreo.", cameraLive: "En vivo", cameraUnavailable: "Cámara temporalmente no disponible", camera1: "Cámara 1", camera2: "Cámara 2", camera3: "Cámara 3", enlarge: "Ampliar", captureImage: "Capturar imagen", recordVideo: "Grabar video", stopRecording: "Detener grabación", recording: "Grabando", recordingLimit: "Grabación acelerada · 1 cuadro/s · máximo 30 s", videoUnsupported: "La grabación de video no está disponible en este navegador", captureFailed: "Falló la captura", housekeepingTitle: "Housekeeping", housekeepingCopy: "Elegí la familia de telemetría que querés ver abajo.", availableChannels: "{count} canales disponibles", threeSiteCameras: "3 cámaras del sitio", navigation: "Navegación principal", timezone: "Zona horaria", runtimeServer: "Servidor", displayedCooldown: "Cooldown mostrado", currentCooldown: "Cooldown actual", latestGlobal: "Último punto global", heroTitle: "Vista en vivo del cooldown actual.", heroCopy: "Esta vista usa el directorio local del cooldown más reciente. Cada fuente conserva su cronología y estado de calidad.",
     metric1K: "Etapa de 1 K", metric4K: "Filtros de 4 K", metricPressure: "Presión del criostato", metricInside: "Temperatura interior", snapshotGenerated: "Instantánea local generada el {date}", automaticRefresh: "Actualización automática · sin recargar la página", phaseColdPartial: "Fase fría — flujo parcial", phaseCooldown: "Enfriamiento",
     observatoryAlt: "Observatorio QUBIC en Alto Chorrillos", daysBefore: "−2 días", eventT0: "Evento t₀", daysAfter: "+12 días",
     "channel.avs47_1_ch1": "Etapa de 1 K", "channel.avs47_1_ch4": "Cabezal frío del frigo de 1 K", "channel.avs47_1_ch6": "Cabezal frío del frigo de 300 mK", "channel.temperature06": "Filtros de 4 K", "channel.pressure1": "Presión del criostato", "channel.inside_temperature": "Temperatura interior", "channel.inside_humidity": "Humedad interior",
@@ -489,6 +510,7 @@ const messages: Record<Language, Record<string, string>> = {
     "eyebrow.overview": "Monitoraggio", "eyebrow.cold": "Sub-K",
     "range.all": "Tutto", "status.fresh": "Aggiornato", "status.delayed": "In ritardo", "status.stale": "Obsoleto", "status.missing": "Assente",
     notAvailable: "Non disponibile", neverReceived: "mai ricevuto", ageMinutes: "{count} min fa", ageHours: "{count} h fa", ageDays: "{count} g fa",
+    sourceStatusOk: "Stato delle sorgenti: OK", sourceStatusProblem: "Diagnosi delle sorgenti", lastDataOnFile: "Ultimi dati nel file: {date}", lastSuccessfulDownload: "Ultimo download riuscito: {age}", lastDownloadFailed: "L’ultimo download è fallito il {date}", downloadStatusUnavailable: "Stato del download non disponibile", downloadDataLag: "I file sono stati scaricati {age}, ma l’ultima misura valida risale al {date}.", noSuccessfulDownload: "Non è ancora stato registrato alcun download riuscito.", runtimeServer: "Server",
     loading: "Lettura dello strumento…", loadError: "I dati locali non sono ancora disponibili.", loadErrorHelp: "Aggiorna l’importatore e ricarica questa pagina.", warningTitle: "Flusso di telemetria parziale", warningBody: "{count} sorgente/i senza dati recenti — le curve non vengono mai estese oltre l’ultima misura.",
     mainTemperatures: "Temperature principali", cryogenicEvolution: "Evoluzione criogenica", chartCopy: "Aggregati per canale. Ogni sorgente mantiene la propria cronologia e freschezza.", timeWindow: "Intervallo temporale", boxZoom: "Zoom rettangolare", dragToZoom: "Trascina un rettangolo sulla curva per ingrandire entrambi gli assi", resetZoom: "Reimposta zoom", yAxis: "Asse Y", yMinimum: "Minimo", yMaximum: "Massimo", displayMode: "Statistica visualizzata", displayValue: "Valore", displayMinimum: "Minimo", displayMaximum: "Massimo", autoScale: "Auto", logScale: "Scala log", visibleChannels: "Canali visibili", emptyChart: "Nessun canale visibile in questo periodo.", chartHint: "Usa la fascia inferiore per ingrandire e spostarti nel tempo.",
     forecast: "Previsioni", forecastUnavailable: "Previsioni temporaneamente non disponibili", forecastSource: "Previsioni Open-Meteo · coordinate QUBIC e quota 4.869 m", diurnalReference: "Inviluppo RMS di 7 giorni", diurnalReferenceCopy: "Inviluppo trasparente ± RMS centrato sulla curva corrente e stimato sui 7 giorni precedenti", expectedPattern: "Inviluppo RMS di 7 giorni", windRoseTitle: "Velocità e direzione di arrivo del vento", windRoseCopy: "La mappa dei colori usa il periodo di densità scelto; i campioni recenti sfumano con l’età nella finestra temporale visualizzata.", windFrom: "Vento da {direction}", fullCooldownDensity: "Cooldown completo", last24hDensity: "Ultime 24 h", last7dDensity: "Ultimi 7 giorni",
@@ -992,15 +1014,30 @@ function LoadingState({ language }: { language: Language }) {
   );
 }
 
-function SourceWarning({ snapshot, language }: { snapshot: MonitoringSnapshot; language: Language }) {
+function SourceWarning({ snapshot, language, timeZone, syncStatus, nowMs }: { snapshot: MonitoringSnapshot; language: Language; timeZone: DisplayTimeZone; syncStatus: SyncStatus | null; nowMs: number }) {
   const staleCount = snapshot.sourceHealth.stale + snapshot.sourceHealth.missing;
-  if (!staleCount) return null;
+  const latestDataMs = snapshot.latestGlobalMs || null;
+  const lastSuccessMs = syncStatus?.lastSuccessAtMs ?? null;
+  const lastAttemptMs = syncStatus?.lastAttemptAtMs ?? null;
+  const referenceNowMs = nowMs || snapshot.generatedAtMs;
+  const downloadAgeMs = lastSuccessMs === null ? null : Math.max(0, referenceNowMs - lastSuccessMs);
+  const dataLagMs = lastSuccessMs !== null && latestDataMs !== null ? lastSuccessMs - latestDataMs : 0;
+  const dataLagging = dataLagMs > 15 * 60_000;
+  const downloadFailed = syncStatus?.status === "failed";
+  const statusUnknown = syncStatus === null || syncStatus.status === "unknown";
+  const hasProblem = staleCount > 0 || downloadFailed || statusUnknown || lastSuccessMs === null || dataLagging;
   return (
-    <div className="source-warning" role="status">
-      <span className="warning-icon">!</span>
+    <div className={`source-warning ${hasProblem ? "source-warning-problem" : "source-warning-ok"}`} role="status">
+      <span className="warning-icon">{hasProblem ? "!" : "✓"}</span>
       <div>
-        <strong>{translate(language, "warningTitle")}</strong>
-        <span>{translate(language, "warningBody", { count: staleCount })}</span>
+        <strong>{translate(language, hasProblem ? "sourceStatusProblem" : "sourceStatusOk")}</strong>
+        <span>{translate(language, "lastDataOnFile", { date: formatDate(latestDataMs, language, timeZone) })}</span>
+        {lastSuccessMs !== null
+          ? <span>{translate(language, "lastSuccessfulDownload", { age: formatAge(downloadAgeMs, language) })}</span>
+          : <span>{translate(language, statusUnknown ? "downloadStatusUnavailable" : "noSuccessfulDownload")}</span>}
+        {downloadFailed && lastAttemptMs !== null ? <span>{translate(language, "lastDownloadFailed", { date: formatDate(lastAttemptMs, language, timeZone) })}</span> : null}
+        {dataLagging ? <span>{translate(language, "downloadDataLag", { age: formatAge(downloadAgeMs, language), date: formatDate(latestDataMs, language, timeZone) })}</span> : null}
+        {staleCount ? <span>{translate(language, "warningBody", { count: staleCount })}</span> : null}
       </div>
     </div>
   );
@@ -2630,7 +2667,7 @@ function ComparisonPanel({ snapshot, language }: { snapshot: MonitoringSnapshot;
   );
 }
 
-function SourcesPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnapshot; language: Language; timeZone: DisplayTimeZone }) {
+function SourcesPanel({ snapshot, language, timeZone, syncStatus, nowMs }: { snapshot: MonitoringSnapshot; language: Language; timeZone: DisplayTimeZone; syncStatus: SyncStatus | null; nowMs: number }) {
   return (
     <section className="panel source-panel">
       <div className="panel-heading">
@@ -2669,9 +2706,11 @@ function SourcesPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSn
                     {translate(language, `status.${channel.status}`)}
                   </span>
                 </td>
-                <td>
-                  {formatDate(channel.latestMs, language, timeZone)}
-                  <small>{formatAge(channel.ageMs, language)}</small>
+                <td className="source-timestamps">
+                  <strong>{translate(language, "lastDataOnFile", { date: formatDate(channel.latestMs, language, timeZone) })}</strong>
+                  <small>{syncStatus?.lastSuccessAtMs
+                    ? translate(language, "lastSuccessfulDownload", { age: formatAge(Math.max(0, (nowMs || snapshot.generatedAtMs) - syncStatus.lastSuccessAtMs), language) })
+                    : translate(language, "downloadStatusUnavailable")}</small>
                 </td>
                 <td className="table-value">
                   {formatValue(channel)} {channel.unit}
@@ -2699,8 +2738,18 @@ export default function MonitoringDashboard() {
   const [housekeepingView, setHousekeepingView] = useState<HousekeepingView>("temperatures");
   const [language, setLanguage] = useState<Language>("en");
   const [timeZone, setTimeZone] = useState<DisplayTimeZone>("Europe/Paris");
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
+  const [nowMs, setNowMs] = useState(0);
   const [loadError, setLoadError] = useState(false);
   const snapshotVersionRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const updateClock = () => setNowMs(Date.now());
+    updateClock();
+    const clockTimer = window.setInterval(updateClock, 30_000);
+    return () => window.clearInterval(clockTimer);
+  }, []);
 
   useEffect(() => {
     const savedLanguage = window.localStorage.getItem("qubic-language");
@@ -2717,6 +2766,15 @@ export default function MonitoringDashboard() {
     return () => {
       if (restoreTimer !== undefined) window.clearTimeout(restoreTimer);
     };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/runtime-info", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() as Promise<RuntimeInfo> : Promise.reject(new Error("Runtime information unavailable")))
+      .then((data) => { if (active && data.serverName) setRuntimeInfo(data); })
+      .catch(() => { if (active) setRuntimeInfo(null); });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -2749,8 +2807,26 @@ export default function MonitoringDashboard() {
       }
     }
 
+    async function loadSyncStatus() {
+      try {
+        const response = await fetch("/data/data-sync-status.json", { cache: "no-cache" });
+        if (!response.ok) throw new Error("Sync status unavailable");
+        const data = await response.json() as Partial<SyncStatus>;
+        if (!active) return;
+        setSyncStatus({
+          status: data.status === "success" || data.status === "failed" ? data.status : "unknown",
+          lastAttemptAtMs: typeof data.lastAttemptAtMs === "number" ? data.lastAttemptAtMs : null,
+          lastSuccessAtMs: typeof data.lastSuccessAtMs === "number" ? data.lastSuccessAtMs : null,
+          error: typeof data.error === "string" ? data.error : null,
+        });
+      } catch {
+        if (active) setSyncStatus(null);
+      }
+    }
+
     void loadSnapshot();
-    const refreshTimer = window.setInterval(() => void loadSnapshot(), 30_000);
+    void loadSyncStatus();
+    const refreshTimer = window.setInterval(() => { void loadSnapshot(); void loadSyncStatus(); }, 30_000);
 
     return () => {
       active = false;
@@ -2830,6 +2906,10 @@ export default function MonitoringDashboard() {
             <h1>{currentView.label}</h1>
           </div>
           <div className="topbar-actions">
+            <div className="runtime-server" title={runtimeInfo?.platform ?? translate(language, "runtimeServer")}>
+              <span>{translate(language, "runtimeServer")}</span>
+              <strong>{runtimeInfo?.serverName ?? "—"}</strong>
+            </div>
             <label className="language-select">
               <span aria-hidden="true">◎</span>
               <select
@@ -2869,7 +2949,7 @@ export default function MonitoringDashboard() {
           {view === "monitoring" ? (
             <div className="view-stack">
               <HousekeepingSelector snapshot={snapshot} selected={housekeepingView} setSelected={setHousekeepingView} language={language} />
-              <SourceWarning snapshot={snapshot} language={language} />
+              <SourceWarning snapshot={snapshot} language={language} timeZone={timeZone} syncStatus={syncStatus} nowMs={nowMs} />
               {housekeepingView === "temperatures" ? (
                 <section className="dashboard-grid">
                   <TemperatureChart snapshot={snapshot} language={language} timeZone={timeZone} />
@@ -2885,7 +2965,7 @@ export default function MonitoringDashboard() {
 
           {view === "cycles" ? <ColdPhasePanel snapshot={snapshot} language={language} /> : null}
           {view === "compare" ? <ComparisonPanel snapshot={snapshot} language={language} /> : null}
-          {view === "sources" ? <SourcesPanel snapshot={snapshot} language={language} timeZone={timeZone} /> : null}
+          {view === "sources" ? <div className="view-stack"><SourceWarning snapshot={snapshot} language={language} timeZone={timeZone} syncStatus={syncStatus} nowMs={nowMs} /><SourcesPanel snapshot={snapshot} language={language} timeZone={timeZone} syncStatus={syncStatus} nowMs={nowMs} /></div> : null}
           {view === "webcams" ? <WebcamsPanel language={language} timeZone={timeZone} /> : null}
         </div>
 

@@ -264,6 +264,36 @@ button {
   gap: 12px;
 }
 
+.runtime-server {
+  background: rgba(17, 32, 53, 0.74);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 48px;
+  max-width: 190px;
+  padding: 7px 13px;
+}
+
+.runtime-server span {
+  color: var(--muted);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  margin-bottom: 3px;
+  text-transform: uppercase;
+}
+
+.runtime-server strong {
+  color: var(--text);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .timezone-pill,
 .language-select,
 .cooldown-select {
@@ -522,6 +552,16 @@ button {
   gap: 12px;
   margin: 16px 0;
   padding: 12px 15px;
+}
+
+.source-warning-ok {
+  background: rgba(112, 214, 199, 0.045);
+  border-color: rgba(112, 214, 199, 0.18);
+}
+
+.source-warning-ok .warning-icon {
+  background: rgba(112, 214, 199, 0.14);
+  color: var(--teal);
 }
 
 .view-stack > .source-warning {
@@ -2135,6 +2175,20 @@ button {
   color: var(--muted);
   font-size: 8px;
   margin-top: 4px;
+}
+
+.source-timestamps strong {
+  color: var(--text);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1.45;
+  white-space: normal;
+}
+
+.source-timestamps small {
+  line-height: 1.45;
+  white-space: normal;
 }
 
 .table-value {
