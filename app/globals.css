@@ -1040,49 +1040,54 @@ button {
 
 .y-axis-brush {
   bottom: 69px;
+  cursor: default;
   position: absolute;
   right: 0;
   top: 18px;
-  width: 34px;
+  width: 42px;
   z-index: 6;
 }
 
 .y-axis-brush-track,
 .y-axis-brush-selection {
-  border-radius: 999px;
+  border-radius: 2px;
+  box-sizing: border-box;
   left: 50%;
   position: absolute;
   transform: translateX(-50%);
-  width: 6px;
+  width: 10px;
 }
 
 .y-axis-brush-track {
-  background: rgba(74, 96, 125, 0.42);
+  background: #0d1828;
+  border: 1px solid #4a607d;
   bottom: 10px;
   top: 10px;
 }
 
 .y-axis-brush-selection {
-  background: rgba(104, 185, 255, 0.55);
+  background: rgba(74, 96, 125, 0.78);
+  pointer-events: none;
 }
 
 .y-axis-brush-handle {
-  background: var(--ink-900);
-  border: 2px solid #68b9ff;
-  border-radius: 50%;
+  background: #4a607d;
+  border: 1px solid #91a4bd;
+  border-radius: 2px;
   cursor: ns-resize;
-  height: 14px;
+  height: 9px;
   left: 50%;
   padding: 0;
   position: absolute;
   transform: translateX(-50%);
-  width: 14px;
+  width: 18px;
 }
 
 .y-axis-brush-handle:hover,
 .y-axis-brush-handle:focus-visible {
   background: #68b9ff;
-  box-shadow: 0 0 0 3px rgba(104, 185, 255, 0.2);
+  border-color: #b9dcff;
+  box-shadow: 0 0 0 2px rgba(104, 185, 255, 0.2);
   outline: none;
 }
 
@@ -1090,23 +1095,23 @@ button {
   color: var(--muted);
   font-family: var(--font-geist-mono), monospace;
   font-size: 8px;
-  max-width: 34px;
+  max-width: 58px;
   overflow: hidden;
   position: absolute;
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
-  width: 54px;
+  width: 58px;
 }
 
 .y-axis-brush-label-max {
-  right: -10px;
+  right: -16px;
   top: -13px;
 }
 
 .y-axis-brush-label-min {
   bottom: -13px;
-  right: -10px;
+  right: -16px;
 }
 
 .box-zoom-overlay {
