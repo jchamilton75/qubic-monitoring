@@ -1038,6 +1038,77 @@ button {
   position: relative;
 }
 
+.y-axis-brush {
+  bottom: 69px;
+  position: absolute;
+  right: 0;
+  top: 18px;
+  width: 34px;
+  z-index: 6;
+}
+
+.y-axis-brush-track,
+.y-axis-brush-selection {
+  border-radius: 999px;
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+  width: 6px;
+}
+
+.y-axis-brush-track {
+  background: rgba(74, 96, 125, 0.42);
+  bottom: 10px;
+  top: 10px;
+}
+
+.y-axis-brush-selection {
+  background: rgba(104, 185, 255, 0.55);
+}
+
+.y-axis-brush-handle {
+  background: var(--ink-900);
+  border: 2px solid #68b9ff;
+  border-radius: 50%;
+  cursor: ns-resize;
+  height: 14px;
+  left: 50%;
+  padding: 0;
+  position: absolute;
+  transform: translateX(-50%);
+  width: 14px;
+}
+
+.y-axis-brush-handle:hover,
+.y-axis-brush-handle:focus-visible {
+  background: #68b9ff;
+  box-shadow: 0 0 0 3px rgba(104, 185, 255, 0.2);
+  outline: none;
+}
+
+.y-axis-brush-label {
+  color: var(--muted);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 8px;
+  max-width: 34px;
+  overflow: hidden;
+  position: absolute;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 54px;
+}
+
+.y-axis-brush-label-max {
+  right: -10px;
+  top: -13px;
+}
+
+.y-axis-brush-label-min {
+  bottom: -13px;
+  right: -10px;
+}
+
 .box-zoom-overlay {
   bottom: 69px;
   left: 77px;
@@ -1442,6 +1513,12 @@ button {
   bottom: 31px;
   left: 58px;
   right: 12px;
+  top: 8px;
+}
+
+.weather-chart-canvas .y-axis-brush {
+  bottom: 31px;
+  right: 0;
   top: 8px;
 }
 

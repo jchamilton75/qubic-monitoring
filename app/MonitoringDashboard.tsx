@@ -1193,6 +1193,112 @@ function ZoomControls({ enabled, setEnabled, hasZoom, reset, language }: { enabl
   );
 }
 
+type YRangeFraction = [number, number];
+
+function yDomainWithSelection(domain: [number, number], selection: YRangeFraction | null, logScale = false): [number, number] {
+  const [minimum, maximum] = domain;
+  if (!selection || !Number.isFinite(minimum) || !Number.isFinite(maximum) || maximum <= minimum) return domain;
+  const lowerFraction = Math.min(selection[0], selection[1]);
+  const upperFraction = Math.max(selection[0], selection[1]);
+  if (logScale && minimum > 0 && maximum > 0) {
+    const logMinimum = Math.log10(minimum);
+    const logMaximum = Math.log10(maximum);
+    return [10 ** (logMinimum + lowerFraction * (logMaximum - logMinimum)), 10 ** (logMinimum + upperFraction * (logMaximum - logMinimum))];
+  }
+  return [minimum + lowerFraction * (maximum - minimum), minimum + upperFraction * (maximum - minimum)];
+}
+
+function YAxisRangeBrush({ domain, selection, setSelection, logScale = false, language }: {
+  domain: [number, number];
+  selection: YRangeFraction | null;
+  setSelection: (selection: YRangeFraction) => void;
+  logScale?: boolean;
+  language: Language;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [dragHandle, setDragHandle] = useState<"minimum" | "maximum" | null>(null);
+  const lower = Math.max(0, Math.min(1, selection?.[0] ?? 0));
+  const upper = Math.max(lower, Math.min(1, selection?.[1] ?? 1));
+  const selectedDomain = yDomainWithSelection(domain, [lower, upper], logScale);
+  const minimumGap = 0.025;
+
+  function updateFromFraction(handle: "minimum" | "maximum", fraction: number) {
+    const next = Math.max(0, Math.min(1, fraction));
+    if (handle === "minimum") setSelection([Math.min(next, upper - minimumGap), upper]);
+    else setSelection([lower, Math.max(next, lower + minimumGap)]);
+  }
+
+  function fractionFromPointer(clientY: number) {
+    const bounds = trackRef.current?.getBoundingClientRect();
+    if (!bounds || bounds.height <= 0) return null;
+    const trackTop = bounds.top + 10;
+    const trackHeight = Math.max(1, bounds.height - 20);
+    return 1 - Math.max(0, Math.min(1, (clientY - trackTop) / trackHeight));
+  }
+
+  function adjust(handle: "minimum" | "maximum", delta: number) {
+    updateFromFraction(handle, (handle === "minimum" ? lower : upper) + delta);
+  }
+
+  function handleKeyDown(handle: "minimum" | "maximum", event: React.KeyboardEvent<HTMLButtonElement>) {
+    const step = event.shiftKey ? 0.1 : 0.025;
+    if (event.key === "ArrowUp" || event.key === "ArrowRight") { event.preventDefault(); adjust(handle, step); }
+    if (event.key === "ArrowDown" || event.key === "ArrowLeft") { event.preventDefault(); adjust(handle, -step); }
+    if (event.key === "Home") { event.preventDefault(); updateFromFraction(handle, handle === "minimum" ? 0 : lower + minimumGap); }
+    if (event.key === "End") { event.preventDefault(); updateFromFraction(handle, handle === "minimum" ? upper - minimumGap : 1); }
+  }
+
+  return (
+    <div
+      className="y-axis-brush"
+      ref={trackRef}
+      role="group"
+      aria-label={translate(language, "yAxis")}
+      onPointerMove={(event) => {
+        if (!dragHandle) return;
+        const fraction = fractionFromPointer(event.clientY);
+        if (fraction !== null) updateFromFraction(dragHandle, fraction);
+      }}
+      onPointerUp={(event) => {
+        if (dragHandle) trackRef.current?.releasePointerCapture(event.pointerId);
+        setDragHandle(null);
+      }}
+      onPointerCancel={() => setDragHandle(null)}
+    >
+      <span className="y-axis-brush-label y-axis-brush-label-max">{formatAxisTick(selectedDomain[1], language, logScale)}</span>
+      <span className="y-axis-brush-track" />
+      <span className="y-axis-brush-selection" style={{ bottom: `calc(10px + ${lower * 100}% - ${lower * 20}px)`, height: `calc(${Math.max(0, (upper - lower) * 100)}% - ${Math.max(0, (upper - lower) * 20)}px)` }} />
+      <button
+        type="button"
+        className="y-axis-brush-handle y-axis-brush-handle-minimum"
+        style={{ bottom: `calc(10px + ${lower * 100}% - ${lower * 20}px - 6px)` }}
+        role="slider"
+        aria-label={translate(language, "yMinimum")}
+        aria-orientation="vertical"
+        aria-valuemin={domain[0]}
+        aria-valuemax={domain[1]}
+        aria-valuenow={yDomainWithSelection(domain, [lower, lower], logScale)[0]}
+        onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); trackRef.current?.setPointerCapture(event.pointerId); setDragHandle("minimum"); }}
+        onKeyDown={(event) => handleKeyDown("minimum", event)}
+      />
+      <button
+        type="button"
+        className="y-axis-brush-handle y-axis-brush-handle-maximum"
+        style={{ bottom: `calc(10px + ${upper * 100}% - ${upper * 20}px - 6px)` }}
+        role="slider"
+        aria-label={translate(language, "yMaximum")}
+        aria-orientation="vertical"
+        aria-valuemin={domain[0]}
+        aria-valuemax={domain[1]}
+        aria-valuenow={yDomainWithSelection(domain, [upper, upper], logScale)[0]}
+        onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); trackRef.current?.setPointerCapture(event.pointerId); setDragHandle("maximum"); }}
+        onKeyDown={(event) => handleKeyDown("maximum", event)}
+      />
+      <span className="y-axis-brush-label y-axis-brush-label-min">{formatAxisTick(selectedDomain[0], language, logScale)}</span>
+    </div>
+  );
+}
+
 function HousekeepingSelector({
   snapshot,
   selected,
@@ -1290,6 +1396,7 @@ function TelemetryChart({
   const [zoomMode, setZoomMode] = useState(false);
   const [zoom, setZoom] = useState<ZoomDomain | null>(null);
   const [brushRange, setBrushRange] = useState<{ startIndex: number; endIndex: number } | null>(null);
+  const [ySelection, setYSelection] = useState<YRangeFraction | null>(null);
   const [detailPoints, setDetailPoints] = useState<Record<string, ChannelPoint[]>>({});
   const [detailWindow, setDetailWindow] = useState<[number, number] | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -1322,9 +1429,10 @@ function TelemetryChart({
   const computedYDomain: [number, number] = activeZoom
     ? [activeZoom.yMin, activeZoom.yMax]
     : chartExtent(displayedData, selectedIds, logScale, currentXDomain);
-  const currentYDomain: [number, number] = hardYMinimum !== undefined && !logScale
+  const automaticYDomain: [number, number] = hardYMinimum !== undefined && !logScale
     ? [Math.max(hardYMinimum, computedYDomain[0]), Math.max(hardYMinimum + Number.EPSILON, computedYDomain[1])]
     : computedYDomain;
+  const currentYDomain: [number, number] = yDomainWithSelection(automaticYDomain, ySelection, logScale);
   const visibleSpanMs = Math.max(1, currentXDomain[1] - currentXDomain[0]);
   const fullSpanMs = Math.max(1, (data.at(-1)?.timeMs ?? 1) - (data[0]?.timeMs ?? 0));
   const hoverCurves = useMemo(() => selectedIds.flatMap((id) => {
@@ -1361,6 +1469,7 @@ function TelemetryChart({
     setDetailLoading(false);
     setZoom(null);
     setBrushRange(null);
+    setYSelection(null);
   }
 
   function toggleChannel(id: string) {
@@ -1422,13 +1531,14 @@ function TelemetryChart({
             </LineChart>
           </ResponsiveContainer>
         ) : <div className="empty-chart">{translate(language, "emptyChart")}</div>}
-        {displayedData.length ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { const nextZoom = zoomFromSelection(selection, range, currentXDomain, currentYDomain, logScale); setZoom(nextZoom); setZoomMode(false); void loadDetailedWindow(nextZoom.xMin, nextZoom.xMax); }} /> : null}
+        {displayedData.length ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { const nextZoom = zoomFromSelection(selection, range, currentXDomain, currentYDomain, logScale); setZoom(nextZoom); setYSelection(null); setZoomMode(false); void loadDetailedWindow(nextZoom.xMin, nextZoom.xMax); }} /> : null}
+        {displayedData.length ? <YAxisRangeBrush domain={automaticYDomain} selection={ySelection} setSelection={setYSelection} logScale={logScale} language={language} /> : null}
       </div>
       <div className="plot-control-bar">
         <div className="chart-controls">
           <RangeSelector range={range} setRange={(nextRange) => { setRange(nextRange); resetDataZoom(); }} language={language} />
           <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); resetDataZoom(); }} language={language} />
-          <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom || detailWindow)} reset={resetDataZoom} language={language} />
+          <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom || detailWindow || ySelection)} reset={resetDataZoom} language={language} />
           {detailLoading ? <span className="chart-hint">…</span> : null}
           {allowLogScale ? (
             <button type="button" className={`scale-toggle ${logScale ? "active" : ""}`} onClick={() => { setLogScale((value) => !value); resetDataZoom(); }} aria-pressed={logScale}>
@@ -1465,6 +1575,7 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
   const [zoomMode, setZoomMode] = useState(false);
   const [zoom, setZoom] = useState<ZoomDomain | null>(null);
   const [brushRange, setBrushRange] = useState<{ startIndex: number; endIndex: number } | null>(null);
+  const [ySelection, setYSelection] = useState<YRangeFraction | null>(null);
   const hoverPointer = useMemo(() => createHoverPointerStore(), []);
   const touch = snapshot.channels.find((channel) => channel.id === "avs47_1_ch0");
   const oneK = snapshot.channels.find((channel) => channel.id === "avs47_1_ch1");
@@ -1501,7 +1612,7 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
   const currentXDomain: [number, number] = activeZoom
     ? [activeZoom.xMin, activeZoom.xMax]
     : [brushedData[0]?.timeMs ?? data[0]?.timeMs ?? 0, brushedData.at(-1)?.timeMs ?? data.at(-1)?.timeMs ?? 1];
-  const currentYDomain: [number, number] = activeZoom ? [activeZoom.yMin, activeZoom.yMax] : [0, 1];
+  const currentYDomain: [number, number] = yDomainWithSelection(activeZoom ? [activeZoom.yMin, activeZoom.yMax] : [0, 1], ySelection);
   const visibleSpanMs = Math.max(1, currentXDomain[1] - currentXDomain[0]);
   const fullSpanMs = Math.max(1, (data.at(-1)?.timeMs ?? 1) - (data[0]?.timeMs ?? 0));
   const hoverCurves = useMemo(() => channels.map((channel) => makeHoverCurve(
@@ -1516,6 +1627,7 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
     const halfWindow = Math.max(6 * 3_600_000, (event.endMs - event.startMs) * 8);
     setRange("all");
     setBrushRange(null);
+    setYSelection(null);
     setZoom({ xMin: event.peakMs - halfWindow, xMax: event.peakMs + halfWindow, yMin: 0, yMax: 1, range: "all" });
   }
 
@@ -1523,6 +1635,7 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
     setRange("all");
     setZoom(null);
     setBrushRange(null);
+    setYSelection(null);
     setZoomMode(false);
   }
 
@@ -1555,7 +1668,7 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
           <LineChart data={data} margin={{ top: 18, right: 20, left: 6, bottom: 6 }} onMouseMove={(state) => hoverPointer.set(state.activeCoordinate ?? null)} onMouseLeave={() => hoverPointer.set(null)}>
             <CartesianGrid stroke="rgba(148, 163, 184, 0.12)" vertical={false} />
             <XAxis dataKey="timeMs" type="number" scale="time" domain={activeZoom ? [activeZoom.xMin, activeZoom.xMax] : ["dataMin", "dataMax"]} allowDataOverflow={Boolean(activeZoom)} tickFormatter={(value) => formatCompactDate(value, language, visibleSpanMs, timeZone)} stroke="#66758a" tick={{ fill: "#9aa8bb", fontSize: 11 }} />
-            <YAxis domain={activeZoom ? [activeZoom.yMin, activeZoom.yMax] : [0, 1]} allowDataOverflow={Boolean(activeZoom)} tickFormatter={(value) => formatAxisTick(value, language)} width={58} unit="" stroke="#66758a" tick={{ fill: "#9aa8bb", fontSize: 11 }} />
+            <YAxis domain={currentYDomain} allowDataOverflow={Boolean(activeZoom || ySelection)} tickFormatter={(value) => formatAxisTick(value, language)} width={58} unit="" stroke="#66758a" tick={{ fill: "#9aa8bb", fontSize: 11 }} />
             <DayBoundaryLines domain={currentXDomain} timeZone={timeZone} />
             <CryogenicPhaseLines events={snapshot.events} domain={currentXDomain} language={language} />
             <MhsOperationLines events={touchEvents} domain={currentXDomain} language={language} />
@@ -1566,13 +1679,14 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
             }} />
           </LineChart>
         </ResponsiveContainer> : <div className="empty-chart">{translate(language, "emptyChart")}</div>}
-        {data.length ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { setZoom(zoomFromSelection(selection, range, currentXDomain, currentYDomain)); setZoomMode(false); }} /> : null}
+        {data.length ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { setZoom(zoomFromSelection(selection, range, currentXDomain, currentYDomain)); setYSelection(null); setZoomMode(false); }} /> : null}
+        {data.length ? <YAxisRangeBrush domain={activeZoom ? [activeZoom.yMin, activeZoom.yMax] : [0, 1]} selection={ySelection} setSelection={setYSelection} language={language} /> : null}
       </div>
       <div className="plot-control-bar">
         <div className="chart-controls">
-          <RangeSelector range={range} setRange={(nextRange) => { setRange(nextRange); setZoom(null); setBrushRange(null); }} language={language} />
-          <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); setZoom(null); setBrushRange(null); }} language={language} />
-          <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom)} reset={resetTouchView} language={language} />
+          <RangeSelector range={range} setRange={(nextRange) => { setRange(nextRange); setZoom(null); setBrushRange(null); setYSelection(null); }} language={language} />
+          <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); setZoom(null); setBrushRange(null); setYSelection(null); }} language={language} />
+          <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom || ySelection)} reset={resetTouchView} language={language} />
         </div>
         <p className="chart-hint">{translate(language, "normalizedSignal")} · 0 → 1</p>
       </div>
@@ -1725,6 +1839,7 @@ function CompactWeatherChart({
   const [zoom, setZoom] = useState<ZoomDomain | null>(null);
   const [detailPoints, setDetailPoints] = useState<Record<string, ChannelPoint[]>>({});
   const [detailWindow, setDetailWindow] = useState<[number, number] | null>(null);
+  const [ySelection, setYSelection] = useState<YRangeFraction | null>(null);
   const detailRequestRef = useRef(0);
   const hoverPointer = useMemo(() => createHoverPointerStore(), []);
   const activeZoom = zoom?.range === range ? zoom : null;
@@ -1797,7 +1912,8 @@ function CompactWeatherChart({
     : detailWindow
       ? detailWindow
       : [displayedData[0]?.timeMs ?? 0, displayedData.at(-1)?.timeMs ?? 1];
-  const currentYDomain: [number, number] = activeZoom ? [activeZoom.yMin, activeZoom.yMax] : chartExtent(displayedData, zoomKeys);
+  const automaticYDomain: [number, number] = activeZoom ? [activeZoom.yMin, activeZoom.yMax] : chartExtent(displayedData, zoomKeys);
+  const currentYDomain: [number, number] = yDomainWithSelection(automaticYDomain, ySelection);
   const visibleSpanMs = Math.max(1, currentXDomain[1] - currentXDomain[0]);
   const hoverCurves = useMemo(() => chartChannels.flatMap((channel) => {
     if (!selectedIds.includes(channel.id)) return [];
@@ -1825,6 +1941,7 @@ function CompactWeatherChart({
     setDetailPoints({});
     setDetailWindow(null);
     setZoom(null);
+    setYSelection(null);
   }
 
   function toggleChannel(id: string) {
@@ -1865,12 +1982,13 @@ function CompactWeatherChart({
           {channels.map((channel) => selectedIds.includes(channel.id) && showForecast && forecastFields[channel.id] ? <Line key={`forecast-${channel.id}`} type="monotone" dataKey={`forecast_${channel.id}`} name={`forecast_${channel.id}`} stroke={channel.color} strokeWidth={2} strokeDasharray="8 5" dot={false} activeDot={false} connectNulls isAnimationActive={false} /> : null)}
           {showForecastHistory ? (forecast?.history ?? []).slice(-24).flatMap((run) => channels.map((channel) => selectedIds.includes(channel.id) && forecastFields[channel.id] ? <Line key={`forecast-history-${channel.id}-${run.generatedAtMs}`} type="monotone" dataKey={`forecast_history_${channel.id}_${run.generatedAtMs}`} name={`forecast_history_${channel.id}_${run.generatedAtMs}`} stroke={channel.color} strokeOpacity={0.24} strokeWidth={1} strokeDasharray="3 4" dot={false} activeDot={false} connectNulls isAnimationActive={false} /> : null)) : null}
         </LineChart></ResponsiveContainer> : <div className="empty-chart">{translate(language, "emptyChart")}</div>}
-        {displayedData.length && selectedIds.length ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { const nextZoom = zoomFromSelection(selection, range, currentXDomain, currentYDomain); setZoom(nextZoom); setZoomMode(false); void loadDetailedWindow(nextZoom.xMin, nextZoom.xMax); }} /> : null}
+        {displayedData.length && selectedIds.length ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { const nextZoom = zoomFromSelection(selection, range, currentXDomain, currentYDomain); setZoom(nextZoom); setYSelection(null); setZoomMode(false); void loadDetailedWindow(nextZoom.xMin, nextZoom.xMax); }} /> : null}
+        {displayedData.length && selectedIds.length ? <YAxisRangeBrush domain={automaticYDomain} selection={ySelection} setSelection={setYSelection} language={language} /> : null}
       </div>
       <div className="weather-plot-controls">
         <div className="chart-controls">
           <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); resetDataZoom(); }} language={language} />
-          <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom || detailWindow)} reset={resetDataZoom} language={language} />
+          <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom || detailWindow || ySelection)} reset={resetDataZoom} language={language} />
         </div>
       </div>
     </article>
