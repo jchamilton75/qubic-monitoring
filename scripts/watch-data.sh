@@ -8,6 +8,7 @@ watch_status_path="${project_directory}/public/data/data-watch-status.json"
 heartbeat_path="${project_directory}/public/data/data-watch-heartbeat.json"
 refresh_seconds="${QUBIC_REFRESH_SECONDS:-120}"
 update_timeout_seconds="${QUBIC_UPDATE_TIMEOUT_SECONDS:-900}"
+skip_initial_update="${QUBIC_SKIP_INITIAL_UPDATE:-0}"
 watcher_pid="$$"
 watcher_started_at_ms="$(node -e 'process.stdout.write(String(Date.now()))')"
 
@@ -75,6 +76,13 @@ stop_watcher() {
 
 trap stop_watcher INT TERM
 write_watch_status "running" "never" "null" "null" "$(now_ms)"
+
+if [[ "${skip_initial_update}" == "1" ]]; then
+  initial_update_ms="$(now_ms)"
+  initial_next_update_at_ms=$((initial_update_ms + refresh_seconds * 1000))
+  write_watch_status "running" "success" "${initial_update_ms}" "${initial_update_ms}" "${initial_next_update_at_ms}"
+  sleep "${refresh_seconds}"
+fi
 
 while true; do
   update_started_at_ms="$(now_ms)"
