@@ -55,7 +55,9 @@ npm run monitor
 
 The collector refreshes continuously (120 seconds by default) and the browser
 checks for a new snapshot every 30 seconds. Set `QUBIC_REFRESH_SECONDS` to tune
-the collector interval.
+the collector interval. An individual refresh is limited to 15 minutes by
+default (`QUBIC_UPDATE_TIMEOUT_SECONDS`); a stuck refresh terminates the
+watcher so systemd can restart it.
 
 The collector publishes two small ignored status files in `public/data/`:
 `data-watch-status.json` records the current cycle and next scheduled update,

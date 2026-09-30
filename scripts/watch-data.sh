@@ -7,6 +7,7 @@ project_directory="$(cd "${script_directory}/.." && pwd)"
 watch_status_path="${project_directory}/public/data/data-watch-status.json"
 heartbeat_path="${project_directory}/public/data/data-watch-heartbeat.json"
 refresh_seconds="${QUBIC_REFRESH_SECONDS:-120}"
+update_timeout_seconds="${QUBIC_UPDATE_TIMEOUT_SECONDS:-900}"
 watcher_pid="$$"
 watcher_started_at_ms="$(node -e 'process.stdout.write(String(Date.now()))')"
 
@@ -45,6 +46,27 @@ heartbeat_loop() {
 heartbeat_loop &
 heartbeat_pid=$!
 
+run_data_update() {
+  npm run data:update &
+  local update_pid="$!"
+  while kill -0 "${update_pid}" 2>/dev/null; do
+    local elapsed_ms=$(( $(now_ms) - update_started_at_ms ))
+    if (( elapsed_ms >= update_timeout_seconds * 1000 )); then
+      echo "QUBIC data refresh exceeded ${update_timeout_seconds}s; stopping the watcher so the service manager can restart it." >&2
+      kill "${update_pid}" 2>/dev/null || true
+      for _ in 1 2 3 4 5; do
+        if ! kill -0 "${update_pid}" 2>/dev/null; then break; fi
+        sleep 1
+      done
+      kill -KILL "${update_pid}" 2>/dev/null || true
+      wait "${update_pid}" 2>/dev/null || true
+      return 124
+    fi
+    sleep 5
+  done
+  wait "${update_pid}"
+}
+
 stop_watcher() {
   write_watch_status "stopped" "stopped" "null" "null" "null"
   kill "${heartbeat_pid}" 2>/dev/null || true
@@ -57,13 +79,18 @@ write_watch_status "running" "never" "null" "null" "$(now_ms)"
 while true; do
   update_started_at_ms="$(now_ms)"
   write_watch_status "running" "running" "${update_started_at_ms}" "null" "null"
-  if ! npm run data:update; then
+  if run_data_update; then
+    update_status="success"
+  else
+    update_exit_code="$?"
     echo "QUBIC data refresh failed; the last valid snapshot remains available." >&2
     update_status="failed"
-  else
-    update_status="success"
   fi
   update_finished_at_ms="$(now_ms)"
+  if [[ "${update_exit_code:-0}" -eq 124 ]]; then
+    write_watch_status "running" "failed" "${update_started_at_ms}" "${update_finished_at_ms}" "null"
+    exit 124
+  fi
   next_update_at_ms=$((update_finished_at_ms + refresh_seconds * 1000))
   write_watch_status "running" "${update_status}" "${update_started_at_ms}" "${update_finished_at_ms}" "${next_update_at_ms}"
   sleep "${refresh_seconds}"
