@@ -57,6 +57,23 @@ The collector refreshes continuously (120 seconds by default) and the browser
 checks for a new snapshot every 30 seconds. Set `QUBIC_REFRESH_SECONDS` to tune
 the collector interval.
 
+The collector publishes two small ignored status files in `public/data/`:
+`data-watch-status.json` records the current cycle and next scheduled update,
+while `data-watch-heartbeat.json` is refreshed every 30 seconds. The web
+interface uses both files to report whether the updater is running, stopped or
+no longer responding. The recommended systemd unit is included at
+`deploy/systemd/qubic-data.service`; it uses `Restart=always`, so the server
+restarts the collector automatically if its process exits. A stale heartbeat
+still produces a visible diagnostic, rather than being mistaken for a healthy
+service. On the APC VM, install or refresh that unit with:
+
+```bash
+sudo cp deploy/systemd/qubic-data.service /etc/systemd/system/qubic-data.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now qubic-data.service
+sudo systemctl show qubic-data.service -p Restart -p RestartUSec
+```
+
 The sync command uses the `qubicdl` SSH alias and downloads the requested
 `AVS47`, `TEMPERATURE`, pressure, compressor and weather streams. Webcam
 credentials stay in the ignored `.env.local` file and are never sent to the
