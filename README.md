@@ -77,8 +77,9 @@ service. On the APC VM, install or refresh that unit with:
 
 ```bash
 sudo cp deploy/systemd/qubic-data.service /etc/systemd/system/qubic-data.service
+sudo cp deploy/systemd/qubic-monitor.service /etc/systemd/system/qubic-monitor.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now qubic-data.service
+sudo systemctl enable --now qubic-data.service qubic-monitor.service
 sudo systemctl show qubic-data.service -p Restart -p RestartUSec
 ```
 

@@ -1,17 +1,14 @@
 [Unit]
-Description=QUBIC data synchronizer and SQLite collector
-After=network-online.target
+Description=QUBIC Monitoring web application
+After=network-online.target qubic-data.service
 Wants=network-online.target
-StartLimitIntervalSec=10min
-StartLimitBurst=5
 
 [Service]
 Type=simple
 User=hamilton
 WorkingDirectory=/srv/qubic/qubic-monitoring
-Environment=QUBIC_REFRESH_SECONDS=120
 Environment=QUBIC_PROJECT_DIR=/srv/qubic/qubic-monitoring
-ExecStart=/usr/bin/npm run data:watch
+ExecStart=/usr/bin/npm run start
 Restart=always
 RestartSec=15s
 KillSignal=SIGTERM

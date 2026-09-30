@@ -117,12 +117,12 @@ echo "Building the local production bundle..."
 npm run build
 
 echo "Starting the automatic updater..."
-QUBIC_SKIP_INITIAL_UPDATE=1 npm run data:watch >"${run_directory}/data-watch.log" 2>&1 &
+QUBIC_PROJECT_DIR="${project_directory}" QUBIC_SKIP_INITIAL_UPDATE=1 npm run data:watch >"${run_directory}/data-watch.log" 2>&1 &
 watcher_pid="$!"
 echo "${watcher_pid}" >"${run_directory}/watcher.pid"
 
 echo "Starting the web server on http://127.0.0.1:${port}/"
-npm run start -- --port "${port}" &
+QUBIC_PROJECT_DIR="${project_directory}" npm run start -- --port "${port}" &
 server_pid="$!"
 echo "${server_pid}" >"${run_directory}/server.pid"
 

@@ -117,6 +117,13 @@ type WatchHeartbeat = {
   heartbeatAtMs: number | null;
 };
 
+type DataStatusResponse = {
+  snapshot?: { generatedAtMs?: number } | null;
+  sync?: Partial<SyncStatus> | null;
+  watcher?: Partial<WatchStatus> | null;
+  heartbeat?: Partial<WatchHeartbeat> | null;
+};
+
 type RuntimeInfo = {
   serverName: string;
   platform?: string;
@@ -374,18 +381,19 @@ const messages: Record<Language, Record<string, string>> = {
     downloadStatusUnavailable: "Download status unavailable",
     downloadDataLag: "The files were downloaded {age}, but their newest valid measurement is {date}.",
     noSuccessfulDownload: "No successful file download has been recorded yet.",
-    updaterStatus: "Updater: {status}",
+    updaterStatus: "Automatic data updater: {status}",
     updaterRunning: "running",
     updaterStopped: "stopped",
     updaterStale: "not responding",
-    updaterUnknown: "not detected",
+    updaterUnknown: "not running",
     updaterHelp: "Start the data watcher with ‘npm run monitor’ locally, or check qubic-data.service on the VM.",
-    updateInProgress: "Update currently in progress",
-    nextUpdate: "Next update: {time} ({duration})",
+    updateInProgress: "Current update: in progress since {date}",
+    updateOverdue: "Current update has been running for {age}; it may be stuck.",
+    nextUpdate: "Next scheduled update: {time} ({duration})",
     nextUpdateIn: "in {duration}",
-    nextUpdateDue: "due now",
-    nextUpdateUnknown: "Next update: not scheduled",
-    lastUpdate: "Last update: {status}",
+    nextUpdateDue: "Next scheduled update: due now",
+    nextUpdateUnknown: "",
+    lastUpdate: "Last completed update: {date} · {status}",
     lastUpdateSuccess: "success",
     lastUpdateFailed: "failed",
     lastUpdateUnknown: "unknown",
@@ -492,7 +500,7 @@ const messages: Record<Language, Record<string, string>> = {
     "range.all": "Tout", "status.fresh": "À jour", "status.delayed": "En retard", "status.stale": "Ancien", "status.missing": "Absent",
     notAvailable: "Non disponible", neverReceived: "jamais reçu", ageMinutes: "il y a {count} min", ageHours: "il y a {count} h", ageDays: "il y a {count} j",
     loading: "Lecture de l’instrument…", loadError: "Les données locales ne sont pas encore disponibles.", loadErrorHelp: "Actualisez l’importeur puis rechargez cette page.",
-    warningTitle: "Flux de télémétrie partiel", warningBody: "{count} source(s) sans donnée récente — les courbes ne sont jamais prolongées au-delà de leur dernière mesure.", sourceStatusOk: "État des sources : OK", sourceStatusProblem: "Diagnostic des sources", lastDataOnFile: "Dernières données du fichier : {date}", lastSuccessfulDownload: "Dernier téléchargement réussi : {age}", lastDownloadFailed: "Dernier téléchargement échoué le {date}", downloadStatusUnavailable: "État du téléchargement indisponible", downloadDataLag: "Les fichiers ont été téléchargés {age}, mais leur dernière mesure valide date du {date}.", noSuccessfulDownload: "Aucun téléchargement réussi n’a encore été enregistré.", updaterStatus: "Processus de mise à jour : {status}", updaterRunning: "en route", updaterStopped: "arrêté", updaterStale: "ne répond plus", updaterUnknown: "non détecté", updaterHelp: "Lancez le watcher avec ‘npm run monitor’ en local, ou vérifiez qubic-data.service sur la VM.", updateInProgress: "Mise à jour en cours", nextUpdate: "Prochaine mise à jour : {time} ({duration})", nextUpdateIn: "dans {duration}", nextUpdateDue: "imminente", nextUpdateUnknown: "Prochaine mise à jour : non planifiée", lastUpdate: "Dernière mise à jour : {status}", lastUpdateSuccess: "réussie", lastUpdateFailed: "échouée", lastUpdateUnknown: "inconnue", lastUpdateStopped: "arrêtée", lastUpdateNever: "pas encore exécutée", updaterRestartHint: "Le service doit redémarrer automatiquement si le processus s’arrête.",
+    warningTitle: "Flux de télémétrie partiel", warningBody: "{count} source(s) sans donnée récente — les courbes ne sont jamais prolongées au-delà de leur dernière mesure.", sourceStatusOk: "État des sources : OK", sourceStatusProblem: "Diagnostic des sources", lastDataOnFile: "Dernières données du fichier : {date}", lastSuccessfulDownload: "Dernier téléchargement réussi : {age}", lastDownloadFailed: "Dernier téléchargement échoué le {date}", downloadStatusUnavailable: "État du téléchargement indisponible", downloadDataLag: "Les fichiers ont été téléchargés {age}, mais leur dernière mesure valide date du {date}.", noSuccessfulDownload: "Aucun téléchargement réussi n’a encore été enregistré.", updaterStatus: "Mise à jour automatique des données : {status}", updaterRunning: "en route", updaterStopped: "arrêtée", updaterStale: "ne répond plus", updaterUnknown: "non démarrée", updaterHelp: "Lancez le watcher avec ‘npm run monitor’ en local, ou vérifiez qubic-data.service sur la VM.", updateInProgress: "Mise à jour en cours depuis {date}", updateOverdue: "La mise à jour dure depuis {age} ; elle est peut-être bloquée.", nextUpdate: "Prochaine mise à jour planifiée : {time} ({duration})", nextUpdateIn: "dans {duration}", nextUpdateDue: "Prochaine mise à jour planifiée : imminente", nextUpdateUnknown: "", lastUpdate: "Dernière mise à jour terminée : {date} · {status}", lastUpdateSuccess: "réussie", lastUpdateFailed: "échouée", lastUpdateUnknown: "inconnue", lastUpdateStopped: "arrêtée", lastUpdateNever: "pas encore exécutée", updaterRestartHint: "Le service doit redémarrer automatiquement si le processus s’arrête.",
     mainTemperatures: "Températures principales", cryogenicEvolution: "Évolution cryogénique", chartCopy: "Agrégats par canal. Chaque source conserve sa propre chronologie et fraîcheur.",
     temperaturesCopy: "Tous les canaux de température de l’instrument. Sélectionnez-les par leur nom humain et leur identifiant de fichier.", pressureTitle: "Pression du cryostat", pressureCopy: "Vue logarithmique dédiée à la pression du vide.", touchTitle: "Signal Touch aligné sur l’étage 1 K", touchCopy: "Le Touch utilise le maximum de chaque paquet de rééchantillonnage puis une normalisation logarithmique afin de conserver les ouvertures brèves du switch thermique mécanique. Les deux signaux sont normalisés indépendamment et le graphique s’arrête 24 heures après la fin du refroidissement principal.", touchBucketMaximum: "maximum du paquet", fridgeBucketMaximum: "maximum sur 10 min", mhsOperations: "Ouvertures/fermetures MHS détectées", mhsOperationsCopy: "Détection automatique pendant le refroidissement principal. Sélectionnez une manœuvre pour l’examiner.", mhsOperation: "MHS {count}", mhsPeak: "pic {value}", backToTouchOverview: "Revenir à la vue Touch complète", normalizedSignal: "Signal normalisé", compressorTitle: "Compresseurs des tubes pulsés", compressorCopy: "Températures hélium, entrée et sortie, pression d’entrée et état des deux compresseurs.", weatherTitle: "Météo à Alto Chorrillos", weatherCopy: "Conditions extérieures et intérieures, pression atmosphérique, vitesse et direction du vent.", selectAll: "Tout sélectionner", clearSelection: "Effacer", online: "En ligne", offline: "Hors ligne",
     timeWindow: "Fenêtre temporelle", boxZoom: "Zoom rectangle", dragToZoom: "Tracez un rectangle sur la courbe pour zoomer sur les deux axes", resetZoom: "Réinitialiser le zoom", yAxis: "Axe Y", yMinimum: "Minimum", yMaximum: "Maximum", displayMode: "Statistique affichée", displayValue: "Valeur", displayMinimum: "Minimum", displayMaximum: "Maximum", autoScale: "Auto", logScale: "Échelle log", visibleChannels: "Canaux visibles", emptyChart: "Aucun canal visible dans cette période.", chartHint: "Utilisez la bande inférieure pour zoomer et vous déplacer dans le temps.",
@@ -519,7 +527,7 @@ const messages: Record<Language, Record<string, string>> = {
     "eyebrow.overview": "Monitoreo", "eyebrow.cold": "Sub-K",
     "range.all": "Todo", "status.fresh": "Actualizado", "status.delayed": "Demorado", "status.stale": "Desactualizado", "status.missing": "Ausente",
     notAvailable: "No disponible", neverReceived: "nunca recibido", ageMinutes: "hace {count} min", ageHours: "hace {count} h", ageDays: "hace {count} d",
-    loading: "Leyendo el instrumento…", loadError: "Los datos locales todavía no están disponibles.", loadErrorHelp: "Actualizá el importador y volvé a cargar esta página.", warningTitle: "Flujo de telemetría parcial", warningBody: "{count} fuente(s) sin datos recientes — las curvas nunca se extienden más allá de su última medición.", sourceStatusOk: "Estado de las fuentes: OK", sourceStatusProblem: "Diagnóstico de las fuentes", lastDataOnFile: "Últimos datos en el archivo: {date}", lastSuccessfulDownload: "Última descarga correcta: {age}", lastDownloadFailed: "La última descarga falló el {date}", downloadStatusUnavailable: "Estado de descarga no disponible", downloadDataLag: "Los archivos se descargaron {age}, pero su última medición válida es del {date}.", noSuccessfulDownload: "Todavía no se registró ninguna descarga correcta.", updaterStatus: "Proceso de actualización: {status}", updaterRunning: "en ejecución", updaterStopped: "detenido", updaterStale: "sin respuesta", updaterUnknown: "no detectado", updaterHelp: "Iniciá el watcher con ‘npm run monitor’ en local o verificá qubic-data.service en la VM.", updateInProgress: "Actualización en curso", nextUpdate: "Próxima actualización: {time} ({duration})", nextUpdateIn: "en {duration}", nextUpdateDue: "inminente", nextUpdateUnknown: "Próxima actualización: no programada", lastUpdate: "Última actualización: {status}", lastUpdateSuccess: "correcta", lastUpdateFailed: "fallida", lastUpdateUnknown: "desconocida", lastUpdateStopped: "detenida", lastUpdateNever: "todavía no ejecutada", updaterRestartHint: "El servicio debería reiniciarse automáticamente si el proceso se detiene.",
+    loading: "Leyendo el instrumento…", loadError: "Los datos locales todavía no están disponibles.", loadErrorHelp: "Actualizá el importador y volvé a cargar esta página.", warningTitle: "Flujo de telemetría parcial", warningBody: "{count} fuente(s) sin datos recientes — las curvas nunca se extienden más allá de su última medición.", sourceStatusOk: "Estado de las fuentes: OK", sourceStatusProblem: "Diagnóstico de las fuentes", lastDataOnFile: "Últimos datos en el archivo: {date}", lastSuccessfulDownload: "Última descarga correcta: {age}", lastDownloadFailed: "La última descarga falló el {date}", downloadStatusUnavailable: "Estado de descarga no disponible", downloadDataLag: "Los archivos se descargaron {age}, pero su última medición válida es del {date}.", noSuccessfulDownload: "Todavía no se registró ninguna descarga correcta.", updaterStatus: "Actualizador automático de datos: {status}", updaterRunning: "en ejecución", updaterStopped: "detenido", updaterStale: "sin respuesta", updaterUnknown: "sin iniciar", updaterHelp: "Iniciá el watcher con ‘npm run monitor’ en local o verificá qubic-data.service en la VM.", updateInProgress: "Actualización en curso desde {date}", updateOverdue: "La actualización lleva {age}; puede estar bloqueada.", nextUpdate: "Próxima actualización programada: {time} ({duration})", nextUpdateIn: "en {duration}", nextUpdateDue: "Próxima actualización programada: inminente", nextUpdateUnknown: "", lastUpdate: "Última actualización terminada: {date} · {status}", lastUpdateSuccess: "correcta", lastUpdateFailed: "fallida", lastUpdateUnknown: "desconocida", lastUpdateStopped: "detenida", lastUpdateNever: "todavía no ejecutada", updaterRestartHint: "El servicio debería reiniciarse automáticamente si el proceso se detiene.",
     mainTemperatures: "Temperaturas principales", cryogenicEvolution: "Evolución criogénica", chartCopy: "Agregados por canal. Cada fuente conserva su propia cronología y frescura.", timeWindow: "Ventana temporal", boxZoom: "Zoom rectangular", dragToZoom: "Arrastrá un rectángulo sobre la curva para ampliar ambos ejes", resetZoom: "Restablecer zoom", yAxis: "Eje Y", yMinimum: "Mínimo", yMaximum: "Máximo", displayMode: "Estadística mostrada", displayValue: "Valor", displayMinimum: "Mínimo", displayMaximum: "Máximo", autoScale: "Auto", logScale: "Escala log", visibleChannels: "Canales visibles", emptyChart: "No hay canales visibles en este período.", chartHint: "Usá la banda inferior para ampliar y recorrer el tiempo.",
     forecast: "Pronóstico", forecastUnavailable: "Pronóstico temporalmente no disponible", forecastSource: "Pronóstico Open-Meteo · coordenadas QUBIC y altitud 4.869 m", diurnalReference: "Envolvente RMS de 7 días", diurnalReferenceCopy: "Envolvente transparente ± RMS centrada en la curva actual y estimada con los 7 días anteriores", expectedPattern: "Envolvente RMS de 7 días", windRoseTitle: "Velocidad y dirección de llegada del viento", windRoseCopy: "El mapa de colores usa el período de densidad elegido; las muestras recientes se desvanecen con la antigüedad en la ventana temporal mostrada.", windFrom: "Viento desde {direction}", fullCooldownDensity: "Cooldown completo", last24hDensity: "Últimas 24 h", last7dDensity: "Últimos 7 días",
     temperaturesCopy: "Todos los canales de temperatura del instrumento, identificados por nombre humano y archivo fuente.", pressureTitle: "Presión del criostato", pressureCopy: "Vista logarítmica dedicada a la presión de vacío.", touchTitle: "Señal Touch alineada con la etapa de 1 K", touchCopy: "Touch usa el máximo de cada bloque de remuestreo y una normalización logarítmica para conservar las aperturas breves del interruptor térmico mecánico. Ambas señales se normalizan por separado y el gráfico termina 24 horas después del enfriamiento principal.", touchBucketMaximum: "máximo del bloque", fridgeBucketMaximum: "máximo en 10 min", mhsOperations: "Aperturas/cierres MHS detectados", mhsOperationsCopy: "Detección automática durante el enfriamiento principal. Seleccioná una maniobra para examinarla.", mhsOperation: "MHS {count}", mhsPeak: "pico {value}", backToTouchOverview: "Volver a la vista Touch completa", normalizedSignal: "Señal normalizada", compressorTitle: "Compresores de los tubos de pulso", compressorCopy: "Temperaturas, presión de entrada y estado de los dos compresores.", weatherTitle: "Tiempo en Alto Chorrillos", weatherCopy: "Condiciones exteriores e interiores, presión atmosférica, velocidad y dirección del viento.", selectAll: "Seleccionar todo", clearSelection: "Limpiar", online: "En línea", offline: "Fuera de línea",
@@ -544,7 +552,7 @@ const messages: Record<Language, Record<string, string>> = {
     "eyebrow.overview": "Monitoraggio", "eyebrow.cold": "Sub-K",
     "range.all": "Tutto", "status.fresh": "Aggiornato", "status.delayed": "In ritardo", "status.stale": "Obsoleto", "status.missing": "Assente",
     notAvailable: "Non disponibile", neverReceived: "mai ricevuto", ageMinutes: "{count} min fa", ageHours: "{count} h fa", ageDays: "{count} g fa",
-    sourceStatusOk: "Stato delle sorgenti: OK", sourceStatusProblem: "Diagnosi delle sorgenti", lastDataOnFile: "Ultimi dati nel file: {date}", lastSuccessfulDownload: "Ultimo download riuscito: {age}", lastDownloadFailed: "L’ultimo download è fallito il {date}", downloadStatusUnavailable: "Stato del download non disponibile", downloadDataLag: "I file sono stati scaricati {age}, ma l’ultima misura valida risale al {date}.", noSuccessfulDownload: "Non è ancora stato registrato alcun download riuscito.", updaterStatus: "Processo di aggiornamento: {status}", updaterRunning: "in esecuzione", updaterStopped: "arrestato", updaterStale: "non risponde", updaterUnknown: "non rilevato", updaterHelp: "Avvia il watcher con ‘npm run monitor’ in locale o verifica qubic-data.service sulla VM.", updateInProgress: "Aggiornamento in corso", nextUpdate: "Prossimo aggiornamento: {time} ({duration})", nextUpdateIn: "tra {duration}", nextUpdateDue: "imminente", nextUpdateUnknown: "Prossimo aggiornamento: non pianificato", lastUpdate: "Ultimo aggiornamento: {status}", lastUpdateSuccess: "riuscito", lastUpdateFailed: "fallito", lastUpdateUnknown: "sconosciuto", lastUpdateStopped: "arrestato", lastUpdateNever: "non ancora eseguito", updaterRestartHint: "Il servizio dovrebbe riavviarsi automaticamente se il processo si arresta.", runtimeServer: "Server",
+    sourceStatusOk: "Stato delle sorgenti: OK", sourceStatusProblem: "Diagnosi delle sorgenti", lastDataOnFile: "Ultimi dati nel file: {date}", lastSuccessfulDownload: "Ultimo download riuscito: {age}", lastDownloadFailed: "L’ultimo download è fallito il {date}", downloadStatusUnavailable: "Stato del download non disponibile", downloadDataLag: "I file sono stati scaricati {age}, ma l’ultima misura valida risale al {date}.", noSuccessfulDownload: "Non è ancora stato registrato alcun download riuscito.", updaterStatus: "Aggiornatore automatico dei dati: {status}", updaterRunning: "in esecuzione", updaterStopped: "arrestato", updaterStale: "non risponde", updaterUnknown: "non avviato", updaterHelp: "Avvia il watcher con ‘npm run monitor’ in locale o verifica qubic-data.service sulla VM.", updateInProgress: "Aggiornamento in corso dal {date}", updateOverdue: "L’aggiornamento dura da {age}; potrebbe essere bloccato.", nextUpdate: "Prossimo aggiornamento pianificato: {time} ({duration})", nextUpdateIn: "tra {duration}", nextUpdateDue: "Prossimo aggiornamento pianificato: imminente", nextUpdateUnknown: "", lastUpdate: "Ultimo aggiornamento terminato: {date} · {status}", lastUpdateSuccess: "riuscito", lastUpdateFailed: "fallito", lastUpdateUnknown: "sconosciuto", lastUpdateStopped: "arrestato", lastUpdateNever: "non ancora eseguito", updaterRestartHint: "Il servizio dovrebbe riavviarsi automaticamente se il processo si arresta.", runtimeServer: "Server",
     loading: "Lettura dello strumento…", loadError: "I dati locali non sono ancora disponibili.", loadErrorHelp: "Aggiorna l’importatore e ricarica questa pagina.", warningTitle: "Flusso di telemetria parziale", warningBody: "{count} sorgente/i senza dati recenti — le curve non vengono mai estese oltre l’ultima misura.",
     mainTemperatures: "Temperature principali", cryogenicEvolution: "Evoluzione criogenica", chartCopy: "Aggregati per canale. Ogni sorgente mantiene la propria cronologia e freschezza.", timeWindow: "Intervallo temporale", boxZoom: "Zoom rettangolare", dragToZoom: "Trascina un rettangolo sulla curva per ingrandire entrambi gli assi", resetZoom: "Reimposta zoom", yAxis: "Asse Y", yMinimum: "Minimo", yMaximum: "Massimo", displayMode: "Statistica visualizzata", displayValue: "Valore", displayMinimum: "Minimo", displayMaximum: "Massimo", autoScale: "Auto", logScale: "Scala log", visibleChannels: "Canali visibili", emptyChart: "Nessun canale visibile in questo periodo.", chartHint: "Usa la fascia inferiore per ingrandire e spostarti nel tempo.",
     forecast: "Previsioni", forecastUnavailable: "Previsioni temporaneamente non disponibili", forecastSource: "Previsioni Open-Meteo · coordinate QUBIC e quota 4.869 m", diurnalReference: "Inviluppo RMS di 7 giorni", diurnalReferenceCopy: "Inviluppo trasparente ± RMS centrato sulla curva corrente e stimato sui 7 giorni precedenti", expectedPattern: "Inviluppo RMS di 7 giorni", windRoseTitle: "Velocità e direzione di arrivo del vento", windRoseCopy: "La mappa dei colori usa il periodo di densità scelto; i campioni recenti sfumano con l’età nella finestra temporale visualizzata.", windFrom: "Vento da {direction}", fullCooldownDensity: "Cooldown completo", last24hDensity: "Ultime 24 h", last7dDensity: "Ultimi 7 giorni",
@@ -892,7 +900,7 @@ function formatDuration(durationMs: number) {
 }
 
 function formatNextUpdate(nextUpdateAtMs: number | null, referenceNowMs: number, language: Language, timeZone: DisplayTimeZone) {
-  if (nextUpdateAtMs === null) return translate(language, "nextUpdateUnknown");
+  if (nextUpdateAtMs === null) return null;
   const remainingMs = nextUpdateAtMs - referenceNowMs;
   if (remainingMs <= 0) return translate(language, "nextUpdateDue");
   return translate(language, "nextUpdate", {
@@ -1088,6 +1096,7 @@ function SourceWarning({ snapshot, language, timeZone, syncStatus, watchStatus, 
         : "unknown";
   const updateRunning = watchStatus?.lastUpdateStatus === "running";
   const updateStartMs = watchStatus?.lastUpdateStartedAtMs ?? null;
+  const updateFinishedMs = watchStatus?.lastUpdateFinishedAtMs ?? null;
   const updateOverdue = updateRunning && updateStartMs !== null
     && referenceNowMs - updateStartMs > Math.max(10 * 60_000, (watchStatus?.refreshSeconds ?? 120) * 4_000);
   const updaterProblem = updaterState !== "running" || updateOverdue;
@@ -1102,6 +1111,9 @@ function SourceWarning({ snapshot, language, timeZone, syncStatus, watchStatus, 
         : watchStatus?.lastUpdateStatus === "never"
           ? "lastUpdateNever"
           : "lastUpdateUnknown";
+  const nextUpdateLabel = updaterState === "running" && !updateRunning
+    ? formatNextUpdate(watchStatus?.nextUpdateAtMs ?? null, referenceNowMs, language, timeZone)
+    : null;
   return (
     <div className={`source-warning ${hasProblem ? "source-warning-problem" : "source-warning-ok"}`} role="status">
       <span className="warning-icon">{hasProblem ? "!" : "✓"}</span>
@@ -1109,10 +1121,17 @@ function SourceWarning({ snapshot, language, timeZone, syncStatus, watchStatus, 
         <strong>{translate(language, hasProblem ? "sourceStatusProblem" : "sourceStatusOk")}</strong>
         <span>{translate(language, "updaterStatus", { status: translate(language, updaterStatusKey) })}</span>
         {updaterState !== "running" ? <span>{translate(language, "updaterHelp")}</span> : null}
-        {watchStatus?.lastUpdateStatus === "running"
-          ? <span>{translate(language, updateOverdue ? "updaterStale" : "updateInProgress")}</span>
-          : <span>{translate(language, "lastUpdate", { status: translate(language, lastUpdateStatusKey) })}</span>}
-        <span>{formatNextUpdate(watchStatus?.nextUpdateAtMs ?? null, referenceNowMs, language, timeZone)}</span>
+        {updaterState === "running" && updateRunning
+          ? <span>{translate(language, updateOverdue ? "updateOverdue" : "updateInProgress", updateOverdue
+            ? { age: formatAge(Math.max(0, referenceNowMs - (updateStartMs ?? referenceNowMs)), language) }
+            : { date: formatDate(updateStartMs, language, timeZone) })}</span>
+          : null}
+        {updaterState === "running" && !updateRunning && updateFinishedMs !== null
+          ? <span>{translate(language, "lastUpdate", { date: formatDate(updateFinishedMs, language, timeZone), status: translate(language, lastUpdateStatusKey) })}</span>
+          : null}
+        {nextUpdateLabel
+          ? <span>{nextUpdateLabel}</span>
+          : null}
         <span>{translate(language, "lastDataOnFile", { date: formatDate(latestDataMs, language, timeZone) })}</span>
         {lastSuccessMs !== null
           ? <span>{translate(language, "lastSuccessfulDownload", { age: formatAge(downloadAgeMs, language) })}</span>
@@ -2865,20 +2884,46 @@ export default function MonitoringDashboard() {
     let active = true;
     let hasLoaded = false;
 
-    async function loadSnapshot() {
+    function applyDataStatus(data: DataStatusResponse) {
+      const sync = data.sync;
+      const watcher = data.watcher;
+      const heartbeat = data.heartbeat;
+      setSyncStatus(sync ? {
+        status: sync.status === "success" || sync.status === "failed" ? sync.status : "unknown",
+        lastAttemptAtMs: typeof sync.lastAttemptAtMs === "number" ? sync.lastAttemptAtMs : null,
+        lastSuccessAtMs: typeof sync.lastSuccessAtMs === "number" ? sync.lastSuccessAtMs : null,
+        error: typeof sync.error === "string" ? sync.error : null,
+      } : null);
+      setWatchStatus(watcher ? {
+        status: watcher.status === "running" || watcher.status === "stopped" ? watcher.status : "unknown",
+        watcherPid: typeof watcher.watcherPid === "number" ? watcher.watcherPid : null,
+        watcherStartedAtMs: typeof watcher.watcherStartedAtMs === "number" ? watcher.watcherStartedAtMs : null,
+        refreshSeconds: typeof watcher.refreshSeconds === "number" ? watcher.refreshSeconds : null,
+        lastUpdateStatus: watcher.lastUpdateStatus === "success" || watcher.lastUpdateStatus === "failed" || watcher.lastUpdateStatus === "running" || watcher.lastUpdateStatus === "never" || watcher.lastUpdateStatus === "stopped" ? watcher.lastUpdateStatus : "unknown",
+        lastUpdateStartedAtMs: typeof watcher.lastUpdateStartedAtMs === "number" ? watcher.lastUpdateStartedAtMs : null,
+        lastUpdateFinishedAtMs: typeof watcher.lastUpdateFinishedAtMs === "number" ? watcher.lastUpdateFinishedAtMs : null,
+        nextUpdateAtMs: typeof watcher.nextUpdateAtMs === "number" ? watcher.nextUpdateAtMs : null,
+      } : null);
+      setWatchHeartbeat(heartbeat ? {
+        watcherPid: typeof heartbeat.watcherPid === "number" ? heartbeat.watcherPid : null,
+        heartbeatAtMs: typeof heartbeat.heartbeatAtMs === "number" ? heartbeat.heartbeatAtMs : null,
+      } : null);
+    }
+
+    async function loadMonitoringState() {
       try {
-        try {
-          const statusResponse = await fetch("/data/monitoring-status.json", { cache: "no-cache" });
-          if (statusResponse.ok) {
-            const status = await statusResponse.json() as { generatedAtMs?: number };
-            if (typeof status.generatedAtMs === "number" && snapshotVersionRef.current === status.generatedAtMs) {
-              hasLoaded = true;
-              setLoadError(false);
-              return;
-            }
-          }
-        } catch { /* Fall back to the complete snapshot when the small status file is unavailable. */ }
-        const response = await fetch("/data/monitoring-snapshot.json", { cache: "no-cache" });
+        const statusResponse = await fetch("/api/data-status", { cache: "no-store" });
+        if (!statusResponse.ok) throw new Error("Live status unavailable");
+        const status = await statusResponse.json() as DataStatusResponse;
+        if (!active) return;
+        applyDataStatus(status);
+        const generatedAtMs = status.snapshot?.generatedAtMs;
+        if (typeof generatedAtMs === "number" && snapshotVersionRef.current === generatedAtMs) {
+          hasLoaded = true;
+          setLoadError(false);
+          return;
+        }
+        const response = await fetch("/api/monitoring-snapshot", { cache: "no-store" });
         if (!response.ok) throw new Error("Snapshot unavailable");
         const data = (await response.json()) as MonitoringSnapshot;
         if (!active) return;
@@ -2891,59 +2936,8 @@ export default function MonitoringDashboard() {
       }
     }
 
-    async function loadSyncStatus() {
-      try {
-        const response = await fetch("/data/data-sync-status.json", { cache: "no-cache" });
-        if (!response.ok) throw new Error("Sync status unavailable");
-        const data = await response.json() as Partial<SyncStatus>;
-        if (!active) return;
-        setSyncStatus({
-          status: data.status === "success" || data.status === "failed" ? data.status : "unknown",
-          lastAttemptAtMs: typeof data.lastAttemptAtMs === "number" ? data.lastAttemptAtMs : null,
-          lastSuccessAtMs: typeof data.lastSuccessAtMs === "number" ? data.lastSuccessAtMs : null,
-          error: typeof data.error === "string" ? data.error : null,
-        });
-      } catch {
-        if (active) setSyncStatus(null);
-      }
-    }
-
-    async function loadWatchStatus() {
-      try {
-        const [statusResponse, heartbeatResponse] = await Promise.all([
-          fetch("/data/data-watch-status.json", { cache: "no-cache" }),
-          fetch("/data/data-watch-heartbeat.json", { cache: "no-cache" }),
-        ]);
-        if (!statusResponse.ok || !heartbeatResponse.ok) throw new Error("Watcher status unavailable");
-        const status = await statusResponse.json() as Partial<WatchStatus>;
-        const heartbeat = await heartbeatResponse.json() as Partial<WatchHeartbeat>;
-        if (!active) return;
-        setWatchStatus({
-          status: status.status === "running" || status.status === "stopped" ? status.status : "unknown",
-          watcherPid: typeof status.watcherPid === "number" ? status.watcherPid : null,
-          watcherStartedAtMs: typeof status.watcherStartedAtMs === "number" ? status.watcherStartedAtMs : null,
-          refreshSeconds: typeof status.refreshSeconds === "number" ? status.refreshSeconds : null,
-          lastUpdateStatus: status.lastUpdateStatus === "success" || status.lastUpdateStatus === "failed" || status.lastUpdateStatus === "running" || status.lastUpdateStatus === "never" || status.lastUpdateStatus === "stopped" ? status.lastUpdateStatus : "unknown",
-          lastUpdateStartedAtMs: typeof status.lastUpdateStartedAtMs === "number" ? status.lastUpdateStartedAtMs : null,
-          lastUpdateFinishedAtMs: typeof status.lastUpdateFinishedAtMs === "number" ? status.lastUpdateFinishedAtMs : null,
-          nextUpdateAtMs: typeof status.nextUpdateAtMs === "number" ? status.nextUpdateAtMs : null,
-        });
-        setWatchHeartbeat({
-          watcherPid: typeof heartbeat.watcherPid === "number" ? heartbeat.watcherPid : null,
-          heartbeatAtMs: typeof heartbeat.heartbeatAtMs === "number" ? heartbeat.heartbeatAtMs : null,
-        });
-      } catch {
-        if (active) {
-          setWatchStatus(null);
-          setWatchHeartbeat(null);
-        }
-      }
-    }
-
-    void loadSnapshot();
-    void loadSyncStatus();
-    void loadWatchStatus();
-    const refreshTimer = window.setInterval(() => { void loadSnapshot(); void loadSyncStatus(); void loadWatchStatus(); }, 30_000);
+    void loadMonitoringState();
+    const refreshTimer = window.setInterval(() => { void loadMonitoringState(); }, 30_000);
 
     return () => {
       active = false;
