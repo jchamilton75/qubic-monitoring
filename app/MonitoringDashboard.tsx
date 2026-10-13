@@ -34,7 +34,7 @@ type Channel = {
   unit: string;
   color: string;
   source: string;
-  aggregation?: "mean" | "bucket_max" | "bucket_max_10m";
+  aggregation?: "mean" | "bucket_max" | "bucket_max_10m" | "bucket_mean_10m";
   firstMs: number;
   latestMs: number | null;
   latestValue: number | null;
@@ -301,6 +301,7 @@ const messages: Record<Language, Record<string, string>> = {
     touchCopy: "Touch uses the maximum value in each resampling bucket and logarithmic normalization so brief mechanical heat-switch openings remain visible. Both signals are normalized independently, and the plot stops 24 hours after the main cooldown ends.",
     touchBucketMaximum: "bucket maximum",
     fridgeBucketMaximum: "10 min maximum",
+    compressorBucketMean: "10 min mean",
     mhsOperations: "Detected MHS open/close operations",
     mhsOperationsCopy: "Detected automatically during the main cooldown. Select an operation to inspect it.",
     mhsOperation: "MHS {count}",
@@ -580,6 +581,10 @@ const timeRangeDurations: Record<TimeRange, number | undefined> = {
   all: undefined,
 };
 
+messages.fr.compressorBucketMean = "moyenne sur 10 min";
+messages.es.compressorBucketMean = "promedio en 10 min";
+messages.it.compressorBucketMean = "media su 10 min";
+
 const dateFormatterCache = new Map<string, Intl.DateTimeFormat>();
 const numberFormatterCache = new Map<Language, Intl.NumberFormat>();
 
@@ -647,15 +652,14 @@ function formatTimelineDate(timeMs: number | null, language: Language, timeZone:
 
 function formatCompactDate(timeMs: number, language: Language, visibleSpanMs: number, timeZone: DisplayTimeZone) {
   const options: Intl.DateTimeFormatOptions =
-    visibleSpanMs <= 6 * 3_600_000
-      ? { hour: "2-digit", minute: "2-digit", timeZoneName: "short" }
-      : visibleSpanMs <= 72 * 3_600_000
-        ? { day: "2-digit", hour: "2-digit", timeZoneName: "short" }
-        : visibleSpanMs <= 14 * 86_400_000
-          ? { day: "2-digit", month: "short", hour: "2-digit", timeZoneName: "short" }
-          : { day: "2-digit", month: "short" };
+    visibleSpanMs <= 14 * 86_400_000
+      ? { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZoneName: "short" }
+      : { day: "2-digit", month: "short" };
 
-  const formatKind = visibleSpanMs <= 6 * 3_600_000 ? "hours" : visibleSpanMs <= 72 * 3_600_000 ? "days" : visibleSpanMs <= 14 * 86_400_000 ? "fortnight" : "long";
+  // Always include a day and month on zoomed views. Hour-only ticks conceal
+  // which day is being inspected, while day-only ticks are ambiguous in a
+  // multi-day view.
+  const formatKind = visibleSpanMs <= 14 * 86_400_000 ? "dated-time" : "long";
   return cachedDateFormatter(`compact:${language}:${timeZone}:${formatKind}`, locales[language], {
     ...options,
     timeZone,
@@ -1567,7 +1571,7 @@ function TelemetryChart({
   const detailTimerRef = useRef<number | null>(null);
   const hoverPointer = useMemo(() => createHoverPointerStore(), []);
   const chartChannels = useMemo(() => channels.map((channel) => detailPoints[channel.id]
-    ? { ...channel, points: detailPoints[channel.id] }
+    ? { ...channel, points: detailPoints[channel.id], aggregation: "mean" as const }
     : channel), [channels, detailPoints]);
   const dataRevision = useMemo(
     () => `${latestGlobalMs}|${chartChannels.map((channel) => `${channel.id}:${channel.latestMs}:${channel.points.length}`).join("|")}`,
@@ -1599,13 +1603,15 @@ function TelemetryChart({
   const visibleSpanMs = Math.max(1, currentXDomain[1] - currentXDomain[0]);
   const fullSpanMs = Math.max(1, (data.at(-1)?.timeMs ?? 1) - (data[0]?.timeMs ?? 0));
   const hoverCurves = useMemo(() => selectedIds.flatMap((id) => {
-    const channel = channels.find((item) => item.id === id);
+    const channel = chartChannels.find((item) => item.id === id);
     if (!channel) return [];
-    const aggregateLabel = channel.aggregation === "bucket_max_10m" ? ` · ${translate(language, "fridgeBucketMaximum")}` : "";
+    const aggregateLabel = channel.aggregation === "bucket_max_10m"
+      ? ` · ${translate(language, "fridgeBucketMaximum")}`
+      : channel.aggregation === "bucket_mean_10m" ? ` · ${translate(language, "compressorBucketMean")}` : "";
     const selectedStatisticLabel = displayStatistic === "value" ? "" : ` · ${statisticLabel(displayStatistic, language)}`;
     const label = `${channelName(channel, language)}${aggregateLabel}${selectedStatisticLabel}`;
     return [makeHoverCurve(displayedData, id, label, channel.unit, channel.color)];
-  }), [channels, displayStatistic, displayedData, language, selectedIds]);
+  }), [chartChannels, displayStatistic, displayedData, language, selectedIds]);
 
   async function loadDetailedWindow(startMs: number, endMs: number) {
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return;
@@ -1656,12 +1662,12 @@ function TelemetryChart({
         <button type="button" onClick={() => { setSelectedIds([]); resetDataZoom(); }}>{translate(language, "clearSelection")}</button>
       </div>
       <div className="channel-selector detailed-selector" aria-label={translate(language, "visibleChannels")}>
-        {channels.map((channel) => {
+        {chartChannels.map((channel) => {
           const selected = selectedIds.includes(channel.id);
           return (
             <button type="button" key={channel.id} className={`channel-chip ${selected ? "selected" : ""}`} onClick={() => toggleChannel(channel.id)} aria-pressed={selected}>
               <span className="channel-swatch" style={{ backgroundColor: channel.color }} />
-              <span className="channel-chip-copy"><strong>{channelName(channel, language)}</strong><small>{channel.sourceName}{channel.aggregation === "bucket_max_10m" ? ` · ${translate(language, "fridgeBucketMaximum")}` : ""}</small></span>
+              <span className="channel-chip-copy"><strong>{channelName(channel, language)}</strong><small>{channel.sourceName}{channel.aggregation === "bucket_max_10m" ? ` · ${translate(language, "fridgeBucketMaximum")}` : channel.aggregation === "bucket_mean_10m" ? ` · ${translate(language, "compressorBucketMean")}` : ""}</small></span>
               <StatusDot status={channel.status} />
             </button>
           );

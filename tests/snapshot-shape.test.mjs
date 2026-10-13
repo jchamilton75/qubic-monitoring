@@ -53,6 +53,10 @@ test("publishes compressor and site-weather telemetry", () => {
   ]) {
     assert.ok(ids.has(id), `missing telemetry series ${id}`);
   }
+
+  for (const channel of snapshot.channels.filter((item) => item.category === "compressor" && !item.id.endsWith("_online"))) {
+    assert.equal(channel.aggregation, "bucket_mean_10m", `${channel.id} must use a uniform 10-minute overview`);
+  }
 });
 
 test("preserves brief Touch openings with per-bucket maxima", () => {

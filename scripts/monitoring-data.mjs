@@ -34,6 +34,10 @@ const analysisScriptPath = join(projectDirectory, "analysis", "run.py");
 const analysisResultsPath = join(localDirectory, "analysis-results.json");
 const storageBucketMs = 30_000;
 const fridgePeakBucketMs = 10 * 60_000;
+// Compressor telemetry is periodic. Keep its overview at one uniform cadence
+// over the whole cooldown so transitions between historical/fine windows do
+// not look like physical changes in the instrument.
+const compressorOverviewBucketMs = 10 * 60_000;
 const peakPreservingChannelIds = new Set(["avs47_1_ch4", "avs47_1_ch6"]);
 const forecastRefreshIntervalMs = 6 * 3_600_000;
 const forecastRetentionMs = 3 * 365 * 86_400_000;
@@ -610,6 +614,14 @@ function exportSnapshot(database, analysis) {
     GROUP BY CAST(bucket_ms / ? AS INTEGER)
     ORDER BY timeMs
   `);
+  const compressorBuckets = database.prepare(`
+    SELECT MIN(first_at_ms) AS timeMs, SUM(sum_value) / SUM(sample_count) AS mean,
+      MIN(min_value) AS min, MAX(max_value) AS max
+    FROM aggregates
+    WHERE channel_id = ? AND sample_count > 0 AND bucket_ms BETWEEN ? AND ?
+    GROUP BY CAST(bucket_ms / ? AS INTEGER)
+    ORDER BY MIN(bucket_ms)
+  `);
 
   const channels = channelDefinitions.map((definition) => {
     const stats = bounds.get(definition.id);
@@ -621,6 +633,7 @@ function exportSnapshot(database, analysis) {
     const fineStartMs = Math.max(firstMs, lastMs - 6 * 3_600_000);
     const mediumStartMs = Math.max(firstMs, lastMs - 72 * 3_600_000);
     const preservesPeaks = peakPreservingChannelIds.has(definition.id);
+    const isCompressor = definition.category === "compressor";
     const readBuckets = (startMs, endMs, widthMs) => {
       if (endMs < startMs) return [];
       const query = definition.category === "touch" ? touchBuckets : buckets;
@@ -635,8 +648,13 @@ function exportSnapshot(database, analysis) {
     const readPeakBuckets = (startMs, endMs) => endMs < startMs ? [] : peakBuckets
       .all(fridgePeakBucketMs, fridgePeakBucketMs, definition.id, startMs, endMs, fridgePeakBucketMs)
       .map((point) => [Number(point.timeMs), Number(point.max), Number(point.min), Number(point.max)]);
+    const readCompressorBuckets = (startMs, endMs) => endMs < startMs ? [] : compressorBuckets
+      .all(definition.id, startMs, endMs, compressorOverviewBucketMs)
+      .map((point) => [Number(point.timeMs), Number(point.mean), Number(point.min), Number(point.max)]);
     let points = firstMs
-      ? preservesPeaks
+      ? isCompressor
+        ? readCompressorBuckets(firstMs, lastMs)
+        : preservesPeaks
         ? readPeakBuckets(firstMs, lastMs)
         : [
             ...readBuckets(firstMs, mediumStartMs - 1, historicalWidth),
@@ -655,7 +673,7 @@ function exportSnapshot(database, analysis) {
       id: definition.id, sourceName: definition.sourceName, label: definition.label,
       shortLabel: definition.shortLabel, group: definition.group, category: definition.category,
       unit: definition.unit, color: definition.color, source: definition.source,
-      aggregation: preservesPeaks ? "bucket_max_10m" : definition.category === "touch" ? "bucket_max" : "mean",
+      aggregation: isCompressor ? "bucket_mean_10m" : preservesPeaks ? "bucket_max_10m" : definition.category === "touch" ? "bucket_max" : "mean",
       firstMs, latestMs: last ? Number(last.timeMs) : null, latestValue: last ? Number(last.value) : null,
       ageMs, status, sampleCount: Number(stats.sampleCount ?? 0), suspectCount: Number(stats.suspectCount ?? 0),
       invalidCount: Number(stats.invalidCount ?? 0), points,

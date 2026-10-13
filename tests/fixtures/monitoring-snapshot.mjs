@@ -46,7 +46,13 @@ for (const id of [
   "compressor2_the", "compressor2_tin", "compressor2_tout", "compressor2_pin", "compressor2_online",
   "site_temperature", "site_humidity", "site_pressure", "site_wind_speed", "site_wind_direction",
 ]) {
-  channels.push({ id, sourceName: id, category: id.startsWith("site_") ? "weather" : "compressor", points: [ordinaryPoint] });
+  channels.push({
+    id,
+    sourceName: id,
+    category: id.startsWith("site_") ? "weather" : "compressor",
+    aggregation: id.startsWith("compressor") && !id.endsWith("_online") ? "bucket_mean_10m" : "mean",
+    points: [ordinaryPoint],
+  });
 }
 
 const eventIds = [
