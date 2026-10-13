@@ -584,6 +584,14 @@ const timeRangeDurations: Record<TimeRange, number | undefined> = {
 messages.fr.compressorBucketMean = "moyenne sur 10 min";
 messages.es.compressorBucketMean = "promedio en 10 min";
 messages.it.compressorBucketMean = "media su 10 min";
+messages.en.dynamicLoading = "Loading high-resolution data…";
+messages.en.dynamicUnavailable = "High-resolution data unavailable; showing overview aggregates.";
+messages.fr.dynamicLoading = "Chargement des données à haute résolution…";
+messages.fr.dynamicUnavailable = "Données haute résolution indisponibles ; les agrégats d’ensemble sont affichés.";
+messages.es.dynamicLoading = "Cargando datos de alta resolución…";
+messages.es.dynamicUnavailable = "Datos de alta resolución no disponibles; se muestran los agregados generales.";
+messages.it.dynamicLoading = "Caricamento dei dati ad alta risoluzione…";
+messages.it.dynamicUnavailable = "Dati ad alta risoluzione non disponibili; vengono mostrati gli aggregati panoramici.";
 
 const dateFormatterCache = new Map<string, Intl.DateTimeFormat>();
 const numberFormatterCache = new Map<Language, Intl.NumberFormat>();
@@ -1186,6 +1194,30 @@ const chartPointBudgets: Record<TimeRange, number> = {
   all: 2400,
 };
 
+function useShortRangePoints(channelIds: string[], range: TimeRange, endMs: number, statistic: DisplayStatistic) {
+  const [state, setState] = useState<{ key: string; points: Record<string, ChannelPoint[]>; loading: boolean; failed: boolean }>({
+    key: "", points: {}, loading: false, failed: false,
+  });
+  const channelKey = channelIds.join(",");
+  const requestKey = `${channelKey}|${range}|${endMs}|${statistic}`;
+  const shouldLoad = (range === "1h" || range === "2h") && Boolean(channelKey) && Number.isFinite(endMs) && endMs > 0;
+  useEffect(() => {
+    const duration = timeRangeDurations[range];
+    if (!shouldLoad || !duration) return;
+    let current = true;
+    const ids = channelKey.split(",");
+    void fetchDynamicChannelPoints(ids, endMs - duration, endMs, statistic, chartPointBudgets[range])
+      .then((response) => {
+        if (current) setState({ key: requestKey, points: response.points, loading: false, failed: false });
+      })
+      .catch(() => {
+        if (current) setState({ key: requestKey, points: {}, loading: false, failed: true });
+      });
+    return () => { current = false; };
+  }, [channelKey, endMs, range, requestKey, shouldLoad, statistic]);
+  return state.key === requestKey ? state : { points: {}, loading: shouldLoad, failed: false };
+}
+
 function RangeSelector({ range, setRange, language }: { range: TimeRange; setRange: (range: TimeRange) => void; language: Language }) {
   return (
     <div className="segmented" aria-label={translate(language, "timeWindow")}>
@@ -1570,9 +1602,12 @@ function TelemetryChart({
   const detailRequestRef = useRef(0);
   const detailTimerRef = useRef<number | null>(null);
   const hoverPointer = useMemo(() => createHoverPointerStore(), []);
+  const rangeDetail = useShortRangePoints(selectedIds, range, latestGlobalMs, displayStatistic);
   const chartChannels = useMemo(() => channels.map((channel) => detailPoints[channel.id]
     ? { ...channel, points: detailPoints[channel.id], aggregation: "mean" as const }
-    : channel), [channels, detailPoints]);
+    : rangeDetail.points[channel.id]
+      ? { ...channel, points: rangeDetail.points[channel.id], aggregation: "mean" as const }
+    : channel), [channels, detailPoints, rangeDetail.points]);
   const dataRevision = useMemo(
     () => `${latestGlobalMs}|${chartChannels.map((channel) => `${channel.id}:${channel.latestMs}:${channel.points.length}`).join("|")}`,
     [chartChannels, latestGlobalMs],
@@ -1709,7 +1744,7 @@ function TelemetryChart({
           <RangeSelector range={range} setRange={(nextRange) => { setRange(nextRange); resetDataZoom(); }} language={language} />
           <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); resetDataZoom(); }} language={language} />
           <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom || detailWindow || yDomainOverride)} reset={resetDataZoom} language={language} />
-          {detailLoading ? <span className="chart-hint">…</span> : null}
+          {detailLoading || rangeDetail.loading ? <span className="chart-hint">{translate(language, "dynamicLoading")}</span> : rangeDetail.failed ? <span className="chart-hint">{translate(language, "dynamicUnavailable")}</span> : null}
           {allowLogScale ? (
             <button type="button" className={`scale-toggle ${logScale ? "active" : ""}`} onClick={() => { setLogScale((value) => !value); resetDataZoom(); }} aria-pressed={logScale}>
               {translate(language, "logScale")}
@@ -1753,13 +1788,17 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
   const mainCooldownEndMs = snapshot.events.find((event) => event.id === "main-cooldown-complete")?.timeMs ?? null;
   const touchDisplayEndMs = Math.min(snapshot.latestGlobalMs, mainCooldownEndMs !== null ? mainCooldownEndMs + 86_400_000 : snapshot.latestGlobalMs);
   const channels = useMemo(() => [touch, oneK].filter(Boolean) as Channel[], [touch, oneK]);
+  const rangeDetail = useShortRangePoints(channels.map((channel) => channel.id), range, touchDisplayEndMs, displayStatistic);
+  const plottedChannels = useMemo(() => channels.map((channel) => rangeDetail.points[channel.id]
+    ? { ...channel, points: rangeDetail.points[channel.id], aggregation: "mean" as const }
+    : channel), [channels, rangeDetail.points]);
   const activeZoom = zoom?.range === range ? zoom : null;
   const data = useMemo(() => {
     const duration = timeRangeDurations[range];
     const minimum = activeZoom?.xMin ?? (duration ? touchDisplayEndMs - duration : Number.NEGATIVE_INFINITY);
     const maximum = activeZoom?.xMax ?? touchDisplayEndMs;
     const rows = new Map<number, ChartDatum>();
-    for (const channel of channels) {
+    for (const channel of plottedChannels) {
       const points = channel.points
         .flatMap((point) => {
           const value = channelPointValue(point, displayStatistic);
@@ -1777,7 +1816,7 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
       }
     }
     return [...rows.values()].sort((a, b) => a.timeMs - b.timeMs);
-  }, [activeZoom, channels, displayStatistic, range, touchDisplayEndMs]);
+  }, [activeZoom, plottedChannels, displayStatistic, range, touchDisplayEndMs]);
   const brushedData = brushRange ? data.slice(brushRange.startIndex, brushRange.endIndex + 1) : data;
   const currentXDomain: [number, number] = activeZoom
     ? [activeZoom.xMin, activeZoom.xMax]
@@ -1786,13 +1825,13 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
   const currentYDomain: [number, number] = yDomainOverride ?? automaticYDomain;
   const visibleSpanMs = Math.max(1, currentXDomain[1] - currentXDomain[0]);
   const fullSpanMs = Math.max(1, (data.at(-1)?.timeMs ?? 1) - (data[0]?.timeMs ?? 0));
-  const hoverCurves = useMemo(() => channels.map((channel) => makeHoverCurve(
+  const hoverCurves = useMemo(() => plottedChannels.map((channel) => makeHoverCurve(
     data,
     channel.id,
     `${channelName(channel, language)} · ${displayStatistic === "value" && channel.id === "avs47_1_ch0" ? translate(language, "touchBucketMaximum") : statisticLabel(displayStatistic, language)}`,
     "",
     channel.color,
-  )), [channels, data, displayStatistic, language]);
+  )), [plottedChannels, data, displayStatistic, language]);
 
   function focusMhsOperation(event: TouchEvent) {
     const halfWindow = Math.max(6 * 3_600_000, (event.endMs - event.startMs) * 8);
@@ -1816,7 +1855,7 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
         <div><p className="eyebrow">{translate(language, "eyebrow.touch")}</p><h2>{translate(language, "touchTitle")}</h2><p className="panel-copy">{translate(language, "touchCopy")}</p></div>
       </div>
       <div className="touch-legend">
-        {channels.map((channel) => <div key={channel.id}><span style={{ background: channel.color }} /><strong>{channelName(channel, language)} · {displayStatistic === "value" && channel.id === "avs47_1_ch0" ? translate(language, "touchBucketMaximum") : statisticLabel(displayStatistic, language)}</strong><small>{channel.sourceName}</small><StatusDot status={channel.status} /></div>)}
+        {plottedChannels.map((channel) => <div key={channel.id}><span style={{ background: channel.color }} /><strong>{channelName(channel, language)} · {displayStatistic === "value" && channel.id === "avs47_1_ch0" ? translate(language, "touchBucketMaximum") : statisticLabel(displayStatistic, language)}</strong><small>{channel.sourceName}</small><StatusDot status={channel.status} /></div>)}
       </div>
       <div className="mhs-operations">
         <div className="mhs-operations-heading">
@@ -1859,6 +1898,7 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
       <div className="plot-control-bar">
         <div className="chart-controls">
           <RangeSelector range={range} setRange={(nextRange) => { setRange(nextRange); setZoom(null); setBrushRange(null); setYDomainOverride(null); }} language={language} />
+          {rangeDetail.loading ? <span className="chart-hint">{translate(language, "dynamicLoading")}</span> : rangeDetail.failed ? <span className="chart-hint">{translate(language, "dynamicUnavailable")}</span> : null}
           <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); setZoom(null); setBrushRange(null); setYDomainOverride(null); }} language={language} />
           <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom || yDomainOverride)} reset={resetTouchView} language={language} />
         </div>
@@ -2016,17 +2056,20 @@ function CompactWeatherChart({
   const [yDomainOverride, setYDomainOverride] = useState<[number, number] | null>(null);
   const detailRequestRef = useRef(0);
   const hoverPointer = useMemo(() => createHoverPointerStore(), []);
+  const rangeDetail = useShortRangePoints(selectedIds, range, latestGlobalMs, displayStatistic);
   const activeZoom = zoom?.range === range ? zoom : null;
   const chartChannels = useMemo(() => channels.map((channel) => detailPoints[channel.id]
     ? { ...channel, points: detailPoints[channel.id] }
-    : channel), [channels, detailPoints]);
+    : rangeDetail.points[channel.id]
+      ? { ...channel, points: rangeDetail.points[channel.id] }
+      : channel), [channels, detailPoints, rangeDetail.points]);
   const data = useMemo(() => {
     const base = mergeChartData(chartChannels, selectedIds, range, latestGlobalMs, undefined, false, 2400, displayStatistic);
     const rows = new Map<number, ChartDatum>(base.map((row) => [row.timeMs, { ...row }]));
     const duration = timeRangeDurations[range];
     const minimum = duration ? latestGlobalMs - duration : Number.NEGATIVE_INFINITY;
     if (showReference) {
-      for (const channel of chartChannels.filter((item) => selectedIds.includes(item.id) && !item.id.includes("wind"))) {
+      for (const channel of channels.filter((item) => selectedIds.includes(item.id) && !item.id.includes("wind"))) {
         for (const [timeMs, band] of rmsEnvelope(channel, minimum, latestGlobalMs, displayStatistic)) {
           const row = rows.get(timeMs) ?? { timeMs };
           row[`band_${channel.id}`] = band;
@@ -2163,6 +2206,7 @@ function CompactWeatherChart({
         <div className="chart-controls">
           <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); resetDataZoom(); }} language={language} />
           <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom || detailWindow || yDomainOverride)} reset={resetDataZoom} language={language} />
+          {rangeDetail.loading ? <span className="chart-hint">{translate(language, "dynamicLoading")}</span> : rangeDetail.failed ? <span className="chart-hint">{translate(language, "dynamicUnavailable")}</span> : null}
         </div>
       </div>
     </article>
@@ -2188,8 +2232,19 @@ function WindRoseChart({ speedChannel, directionChannel, range, latestGlobalMs, 
   const [densityWindow, setDensityWindow] = useState<WindDensityWindow>("all");
   const [detailPoints, setDetailPoints] = useState<Record<string, ChannelPoint[]>>({});
   const detailRequestRef = useRef(0);
-  const detailedSpeedChannel = useMemo(() => speedChannel && detailPoints[speedChannel.id] ? { ...speedChannel, points: detailPoints[speedChannel.id] } : speedChannel, [speedChannel, detailPoints]);
-  const detailedDirectionChannel = useMemo(() => directionChannel && detailPoints[directionChannel.id] ? { ...directionChannel, points: detailPoints[directionChannel.id] } : directionChannel, [directionChannel, detailPoints]);
+  const rangeDetail = useShortRangePoints([speedChannel?.id, directionChannel?.id].filter(Boolean) as string[], range, latestGlobalMs, "value");
+  const rangeDuration = timeRangeDurations[range];
+  const recentStartMs = rangeDuration ? latestGlobalMs - rangeDuration : Number.NEGATIVE_INFINITY;
+  const withRecentDetail = (channel?: Channel) => {
+    if (!channel) return channel;
+    const basePoints = detailPoints[channel.id] ?? channel.points;
+    const recentPoints = rangeDetail.points[channel.id];
+    return recentPoints
+      ? { ...channel, points: [...basePoints.filter(([timeMs]) => timeMs < recentStartMs), ...recentPoints] }
+      : detailPoints[channel.id] ? { ...channel, points: basePoints } : channel;
+  };
+  const detailedSpeedChannel = withRecentDetail(speedChannel);
+  const detailedDirectionChannel = withRecentDetail(directionChannel);
   const samples = useMemo(() => pairWindSamples(detailedSpeedChannel, detailedDirectionChannel), [detailedSpeedChannel, detailedDirectionChannel]);
   const duration = timeRangeDurations[range];
   const recent = useMemo(() => samples.filter((sample) => !duration || sample.timeMs >= latestGlobalMs - duration), [samples, duration, latestGlobalMs]);
@@ -2354,7 +2409,7 @@ function WindRoseChart({ speedChannel, directionChannel, range, latestGlobalMs, 
   return (
     <article className="panel wind-rose-card">
       <div className="wind-rose-heading">
-        <div><p className="eyebrow">{densityLabel}</p><h3>{translate(language, "windRoseTitle")}</h3><p>{translate(language, "windRoseCopy")}</p></div>
+        <div><p className="eyebrow">{densityLabel}</p><h3>{translate(language, "windRoseTitle")}</h3><p>{translate(language, "windRoseCopy")}</p>{rangeDetail.loading ? <small className="chart-hint">{translate(language, "dynamicLoading")}</small> : rangeDetail.failed ? <small className="chart-hint">{translate(language, "dynamicUnavailable")}</small> : null}</div>
         <div className="wind-rose-current"><strong>{current ? `${translate(language, "windFrom", { direction: directionToCompass(current.direction) })} · ${Math.round(current.direction)}° · ${current.speed.toFixed(1)} km/h` : "—"}</strong><div className="segmented density-window-selector" aria-label={translate(language, "fullCooldownDensity")}>
           {(["all", "24h", "7d"] as WindDensityWindow[]).map((windowId) => <button type="button" key={windowId} className={densityWindow === windowId ? "active" : ""} onClick={() => setDensityWindow(windowId)}>{translate(language, windowId === "24h" ? "last24hDensity" : windowId === "7d" ? "last7dDensity" : "fullCooldownDensity")}</button>)}
         </div></div>
