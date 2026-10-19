@@ -592,6 +592,10 @@ messages.es.dynamicLoading = "Cargando datos remuestreados uniformemente para es
 messages.es.dynamicUnavailable = "No hay datos coherentes para este intervalo; se oculta el gráfico para evitar cambios engañosos de resolución.";
 messages.it.dynamicLoading = "Caricamento dei dati ricampionati uniformemente per questo intervallo…";
 messages.it.dynamicUnavailable = "I dati coerenti per questo intervallo non sono disponibili; il grafico è nascosto per evitare cambiamenti fuorvianti di risoluzione.";
+messages.en.dynamicRefreshing = "Updating the time range; the previous uniformly sampled plot remains visible briefly…";
+messages.fr.dynamicRefreshing = "Mise à jour de la période ; le tracé précédent, uniformément rééchantillonné, reste affiché un instant…";
+messages.es.dynamicRefreshing = "Actualizando el intervalo; el gráfico anterior, remuestreado uniformemente, permanece visible un momento…";
+messages.it.dynamicRefreshing = "Aggiornamento dell’intervallo; il grafico precedente, ricampionato uniformemente, resta visibile per un momento…";
 
 const dateFormatterCache = new Map<string, Intl.DateTimeFormat>();
 const numberFormatterCache = new Map<Language, Intl.NumberFormat>();
@@ -1195,12 +1199,12 @@ const chartPointBudgets: Record<TimeRange, number> = {
 };
 
 function useRangePoints(channelIds: string[], range: TimeRange, endMs: number, statistic: DisplayStatistic) {
-  const [state, setState] = useState<{ key: string; points: Record<string, ChannelPoint[]>; loading: boolean; failed: boolean }>({
-    key: "", points: {}, loading: false, failed: false,
+  const [state, setState] = useState<{ key: string; identityKey: string; points: Record<string, ChannelPoint[]>; loading: boolean; failed: boolean; stale?: boolean }>({
+    key: "", identityKey: "", points: {}, loading: false, failed: false,
   });
   const channelKey = channelIds.join(",");
-  const requestBaseKey = `${channelKey}|${range}|${statistic}`;
-  const requestKey = `${requestBaseKey}|${endMs}`;
+  const identityKey = `${channelKey}|${statistic}`;
+  const requestKey = `${identityKey}|${range}|${endMs}`;
   // The exported overview snapshot intentionally has coarser tiers for old
   // data (30 s / 5 min / a cooldown-wide bucket). Mixing those tiers in one
   // chart creates a false visual change at each tier boundary. Re-query the
@@ -1214,19 +1218,21 @@ function useRangePoints(channelIds: string[], range: TimeRange, endMs: number, s
     const ids = channelKey.split(",");
     void fetchDynamicChannelPoints(ids, duration ? endMs - duration : 0, endMs, statistic, chartPointBudgets[range])
       .then((response) => {
-        if (current) setState({ key: requestKey, points: response.points, loading: false, failed: false });
+        if (current) setState({ key: requestKey, identityKey, points: response.points, loading: false, failed: false });
       })
       .catch(() => {
-        if (current) setState({ key: requestKey, points: {}, loading: false, failed: true });
+        if (current) setState({ key: requestKey, identityKey, points: {}, loading: false, failed: true });
       });
     return () => { current = false; };
-  }, [channelKey, endMs, range, requestKey, shouldLoad, statistic]);
-  if (state.key === requestKey) return state;
-  // While a live refresh is in flight, keep the previous consistently binned
-  // series for the same selection/range. Never fall back to the mixed-tier
-  // snapshot, but also avoid blinking the plot empty on each data poll.
-  if (state.key.startsWith(`${requestBaseKey}|`) && !state.failed) return { ...state, loading: shouldLoad };
-  return { points: {}, loading: shouldLoad, failed: false };
+  }, [channelKey, endMs, identityKey, range, requestKey, shouldLoad, statistic]);
+  if (state.key === requestKey) return { ...state, stale: false };
+  // Keep the last successful, uniformly resampled plot visible while another
+  // range is fetched. This avoids a blank chart without reviving the mixed-
+  // resolution snapshot. The loading hint makes the temporary old window clear.
+  if (state.identityKey === identityKey && !state.failed && Object.keys(state.points).length) {
+    return { ...state, loading: shouldLoad, stale: true };
+  }
+  return { identityKey, points: {}, loading: shouldLoad, failed: false, stale: false };
 }
 
 function RangeSelector({ range, setRange, language }: { range: TimeRange; setRange: (range: TimeRange) => void; language: Language }) {
@@ -1748,7 +1754,7 @@ function TelemetryChart({
               }} />
             </LineChart>
           </ResponsiveContainer>
-        ) : <div className="empty-chart">{translate(language, "emptyChart")}</div>}
+        ) : <div className="empty-chart">{translate(language, rangeDetail.loading ? (rangeDetail.stale ? "dynamicRefreshing" : "dynamicLoading") : rangeDetail.failed ? "dynamicUnavailable" : "emptyChart")}</div>}
         {displayedData.length ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { const nextZoom = zoomFromSelection(selection, range, currentXDomain, currentYDomain, logScale); setZoom(nextZoom); setYDomainOverride(null); setZoomMode(false); void loadDetailedWindow(nextZoom.xMin, nextZoom.xMax); }} /> : null}
         {displayedData.length ? <YAxisRangeBrush key={`y-brush-${currentYDomain[0]}-${currentYDomain[1]}`} domain={currentYDomain} onCommit={setYDomainOverride} logScale={logScale} language={language} /> : null}
       </div>
@@ -1757,7 +1763,7 @@ function TelemetryChart({
           <RangeSelector range={range} setRange={(nextRange) => { setRange(nextRange); resetDataZoom(); }} language={language} />
           <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); resetDataZoom(); }} language={language} />
           <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom || detailWindow || yDomainOverride)} reset={resetDataZoom} language={language} />
-          {detailLoading || rangeDetail.loading ? <span className="chart-hint">{translate(language, "dynamicLoading")}</span> : rangeDetail.failed ? <span className="chart-hint">{translate(language, "dynamicUnavailable")}</span> : null}
+          {detailLoading || rangeDetail.loading ? <span className="chart-hint">{translate(language, rangeDetail.stale ? "dynamicRefreshing" : "dynamicLoading")}</span> : rangeDetail.failed ? <span className="chart-hint">{translate(language, "dynamicUnavailable")}</span> : null}
           {allowLogScale ? (
             <button type="button" className={`scale-toggle ${logScale ? "active" : ""}`} onClick={() => { setLogScale((value) => !value); resetDataZoom(); }} aria-pressed={logScale}>
               {translate(language, "logScale")}
@@ -1906,14 +1912,14 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
               }
             }} />
           </LineChart>
-        </ResponsiveContainer> : <div className="empty-chart">{translate(language, "emptyChart")}</div>}
+        </ResponsiveContainer> : <div className="empty-chart">{translate(language, rangeDetail.loading ? (rangeDetail.stale ? "dynamicRefreshing" : "dynamicLoading") : rangeDetail.failed ? "dynamicUnavailable" : "emptyChart")}</div>}
         {data.length ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { setZoom(zoomFromSelection(selection, range, currentXDomain, currentYDomain)); setYDomainOverride(null); setZoomMode(false); }} /> : null}
         {data.length ? <YAxisRangeBrush key={`y-brush-${currentYDomain[0]}-${currentYDomain[1]}`} domain={currentYDomain} onCommit={setYDomainOverride} language={language} /> : null}
       </div>
       <div className="plot-control-bar">
         <div className="chart-controls">
           <RangeSelector range={range} setRange={(nextRange) => { setRange(nextRange); setZoom(null); setBrushRange(null); setYDomainOverride(null); }} language={language} />
-          {rangeDetail.loading ? <span className="chart-hint">{translate(language, "dynamicLoading")}</span> : rangeDetail.failed ? <span className="chart-hint">{translate(language, "dynamicUnavailable")}</span> : null}
+          {rangeDetail.loading ? <span className="chart-hint">{translate(language, rangeDetail.stale ? "dynamicRefreshing" : "dynamicLoading")}</span> : rangeDetail.failed ? <span className="chart-hint">{translate(language, "dynamicUnavailable")}</span> : null}
           <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); setZoom(null); setBrushRange(null); setYDomainOverride(null); }} language={language} />
           <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom || yDomainOverride)} reset={resetTouchView} language={language} />
         </div>
@@ -2215,7 +2221,7 @@ function CompactWeatherChart({
           {channels.map((channel) => selectedIds.includes(channel.id) ? <Line key={channel.id} type="monotone" dataKey={channel.id} name={channel.id} stroke={channel.color} strokeWidth={2} dot={false} activeDot={false} connectNulls isAnimationActive={false} /> : null)}
           {channels.map((channel) => selectedIds.includes(channel.id) && showForecast && forecastFields[channel.id] ? <Line key={`forecast-${channel.id}`} type="monotone" dataKey={`forecast_${channel.id}`} name={`forecast_${channel.id}`} stroke={channel.color} strokeWidth={2} strokeDasharray="8 5" dot={false} activeDot={false} connectNulls isAnimationActive={false} /> : null)}
           {showForecastHistory ? (forecast?.history ?? []).slice(-24).flatMap((run) => channels.map((channel) => selectedIds.includes(channel.id) && forecastFields[channel.id] ? <Line key={`forecast-history-${channel.id}-${run.generatedAtMs}`} type="monotone" dataKey={`forecast_history_${channel.id}_${run.generatedAtMs}`} name={`forecast_history_${channel.id}_${run.generatedAtMs}`} stroke={channel.color} strokeOpacity={0.24} strokeWidth={1} strokeDasharray="3 4" dot={false} activeDot={false} connectNulls isAnimationActive={false} /> : null)) : null}
-        </LineChart></ResponsiveContainer> : <div className="empty-chart">{translate(language, "emptyChart")}</div>}
+        </LineChart></ResponsiveContainer> : <div className="empty-chart">{translate(language, rangeDetail.loading ? (rangeDetail.stale ? "dynamicRefreshing" : "dynamicLoading") : rangeDetail.failed ? "dynamicUnavailable" : "emptyChart")}</div>}
         {displayedData.length && selectedIds.length ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { const nextZoom = zoomFromSelection(selection, range, currentXDomain, currentYDomain); setZoom(nextZoom); setYDomainOverride(null); setZoomMode(false); void loadDetailedWindow(nextZoom.xMin, nextZoom.xMax); }} /> : null}
         {displayedData.length && selectedIds.length ? <YAxisRangeBrush key={`y-brush-${currentYDomain[0]}-${currentYDomain[1]}`} domain={currentYDomain} onCommit={setYDomainOverride} language={language} /> : null}
       </div>
@@ -2223,7 +2229,7 @@ function CompactWeatherChart({
         <div className="chart-controls">
           <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); resetDataZoom(); }} language={language} />
           <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom || detailWindow || yDomainOverride)} reset={resetDataZoom} language={language} />
-          {rangeDetail.loading ? <span className="chart-hint">{translate(language, "dynamicLoading")}</span> : rangeDetail.failed ? <span className="chart-hint">{translate(language, "dynamicUnavailable")}</span> : null}
+          {rangeDetail.loading ? <span className="chart-hint">{translate(language, rangeDetail.stale ? "dynamicRefreshing" : "dynamicLoading")}</span> : rangeDetail.failed ? <span className="chart-hint">{translate(language, "dynamicUnavailable")}</span> : null}
         </div>
       </div>
     </article>
@@ -2427,7 +2433,7 @@ function WindRoseChart({ speedChannel, directionChannel, range, latestGlobalMs, 
   return (
     <article className="panel wind-rose-card">
       <div className="wind-rose-heading">
-        <div><p className="eyebrow">{densityLabel}</p><h3>{translate(language, "windRoseTitle")}</h3><p>{translate(language, "windRoseCopy")}</p>{rangeDetail.loading ? <small className="chart-hint">{translate(language, "dynamicLoading")}</small> : rangeDetail.failed ? <small className="chart-hint">{translate(language, "dynamicUnavailable")}</small> : null}</div>
+        <div><p className="eyebrow">{densityLabel}</p><h3>{translate(language, "windRoseTitle")}</h3><p>{translate(language, "windRoseCopy")}</p>{rangeDetail.loading ? <small className="chart-hint">{translate(language, rangeDetail.stale ? "dynamicRefreshing" : "dynamicLoading")}</small> : rangeDetail.failed ? <small className="chart-hint">{translate(language, "dynamicUnavailable")}</small> : null}</div>
         <div className="wind-rose-current"><strong>{current ? `${translate(language, "windFrom", { direction: directionToCompass(current.direction) })} · ${Math.round(current.direction)}° · ${current.speed.toFixed(1)} km/h` : "—"}</strong><div className="segmented density-window-selector" aria-label={translate(language, "fullCooldownDensity")}>
           {(["all", "24h", "7d"] as WindDensityWindow[]).map((windowId) => <button type="button" key={windowId} className={densityWindow === windowId ? "active" : ""} onClick={() => setDensityWindow(windowId)}>{translate(language, windowId === "24h" ? "last24hDensity" : windowId === "7d" ? "last7dDensity" : "fullCooldownDensity")}</button>)}
         </div></div>
