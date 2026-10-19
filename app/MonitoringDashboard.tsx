@@ -584,14 +584,14 @@ const timeRangeDurations: Record<TimeRange, number | undefined> = {
 messages.fr.compressorBucketMean = "moyenne sur 10 min";
 messages.es.compressorBucketMean = "promedio en 10 min";
 messages.it.compressorBucketMean = "media su 10 min";
-messages.en.dynamicLoading = "Loading high-resolution data…";
-messages.en.dynamicUnavailable = "High-resolution data unavailable; showing overview aggregates.";
-messages.fr.dynamicLoading = "Chargement des données à haute résolution…";
-messages.fr.dynamicUnavailable = "Données haute résolution indisponibles ; les agrégats d’ensemble sont affichés.";
-messages.es.dynamicLoading = "Cargando datos de alta resolución…";
-messages.es.dynamicUnavailable = "Datos de alta resolución no disponibles; se muestran los agregados generales.";
-messages.it.dynamicLoading = "Caricamento dei dati ad alta risoluzione…";
-messages.it.dynamicUnavailable = "Dati ad alta risoluzione non disponibili; vengono mostrati gli aggregati panoramici.";
+messages.en.dynamicLoading = "Loading uniformly resampled data for this time range…";
+messages.en.dynamicUnavailable = "Consistent data for this time range are unavailable; the plot is withheld to avoid misleading resolution changes.";
+messages.fr.dynamicLoading = "Chargement des données uniformément rééchantillonnées pour cette période…";
+messages.fr.dynamicUnavailable = "Les données cohérentes pour cette période sont indisponibles ; le graphique est masqué pour éviter un changement trompeur de résolution.";
+messages.es.dynamicLoading = "Cargando datos remuestreados uniformemente para este intervalo…";
+messages.es.dynamicUnavailable = "No hay datos coherentes para este intervalo; se oculta el gráfico para evitar cambios engañosos de resolución.";
+messages.it.dynamicLoading = "Caricamento dei dati ricampionati uniformemente per questo intervallo…";
+messages.it.dynamicUnavailable = "I dati coerenti per questo intervallo non sono disponibili; il grafico è nascosto per evitare cambiamenti fuorvianti di risoluzione.";
 
 const dateFormatterCache = new Map<string, Intl.DateTimeFormat>();
 const numberFormatterCache = new Map<Language, Intl.NumberFormat>();
@@ -1194,19 +1194,25 @@ const chartPointBudgets: Record<TimeRange, number> = {
   all: 2400,
 };
 
-function useShortRangePoints(channelIds: string[], range: TimeRange, endMs: number, statistic: DisplayStatistic) {
+function useRangePoints(channelIds: string[], range: TimeRange, endMs: number, statistic: DisplayStatistic) {
   const [state, setState] = useState<{ key: string; points: Record<string, ChannelPoint[]>; loading: boolean; failed: boolean }>({
     key: "", points: {}, loading: false, failed: false,
   });
   const channelKey = channelIds.join(",");
-  const requestKey = `${channelKey}|${range}|${endMs}|${statistic}`;
-  const shouldLoad = (range === "1h" || range === "2h") && Boolean(channelKey) && Number.isFinite(endMs) && endMs > 0;
+  const requestBaseKey = `${channelKey}|${range}|${statistic}`;
+  const requestKey = `${requestBaseKey}|${endMs}`;
+  // The exported overview snapshot intentionally has coarser tiers for old
+  // data (30 s / 5 min / a cooldown-wide bucket). Mixing those tiers in one
+  // chart creates a false visual change at each tier boundary. Re-query the
+  // selected time window from the 30 s database aggregates for every range;
+  // the API then applies one uniform bucket width across that whole window.
+  const shouldLoad = Boolean(channelKey) && Number.isFinite(endMs) && endMs > 0;
   useEffect(() => {
     const duration = timeRangeDurations[range];
-    if (!shouldLoad || !duration) return;
+    if (!shouldLoad) return;
     let current = true;
     const ids = channelKey.split(",");
-    void fetchDynamicChannelPoints(ids, endMs - duration, endMs, statistic, chartPointBudgets[range])
+    void fetchDynamicChannelPoints(ids, duration ? endMs - duration : 0, endMs, statistic, chartPointBudgets[range])
       .then((response) => {
         if (current) setState({ key: requestKey, points: response.points, loading: false, failed: false });
       })
@@ -1215,7 +1221,12 @@ function useShortRangePoints(channelIds: string[], range: TimeRange, endMs: numb
       });
     return () => { current = false; };
   }, [channelKey, endMs, range, requestKey, shouldLoad, statistic]);
-  return state.key === requestKey ? state : { points: {}, loading: shouldLoad, failed: false };
+  if (state.key === requestKey) return state;
+  // While a live refresh is in flight, keep the previous consistently binned
+  // series for the same selection/range. Never fall back to the mixed-tier
+  // snapshot, but also avoid blinking the plot empty on each data poll.
+  if (state.key.startsWith(`${requestBaseKey}|`) && !state.failed) return { ...state, loading: shouldLoad };
+  return { points: {}, loading: shouldLoad, failed: false };
 }
 
 function RangeSelector({ range, setRange, language }: { range: TimeRange; setRange: (range: TimeRange) => void; language: Language }) {
@@ -1602,12 +1613,14 @@ function TelemetryChart({
   const detailRequestRef = useRef(0);
   const detailTimerRef = useRef<number | null>(null);
   const hoverPointer = useMemo(() => createHoverPointerStore(), []);
-  const rangeDetail = useShortRangePoints(selectedIds, range, latestGlobalMs, displayStatistic);
-  const chartChannels = useMemo(() => channels.map((channel) => detailPoints[channel.id]
-    ? { ...channel, points: detailPoints[channel.id], aggregation: "mean" as const }
-    : rangeDetail.points[channel.id]
-      ? { ...channel, points: rangeDetail.points[channel.id], aggregation: "mean" as const }
-    : channel), [channels, detailPoints, rangeDetail.points]);
+  const rangeDetail = useRangePoints(selectedIds, range, latestGlobalMs, displayStatistic);
+  const chartChannels = useMemo(() => channels.map((channel) => selectedIds.includes(channel.id) && (rangeDetail.failed || (rangeDetail.loading && !rangeDetail.points[channel.id]))
+    ? { ...channel, points: [] }
+    : detailPoints[channel.id]
+      ? { ...channel, points: detailPoints[channel.id], aggregation: "mean" as const }
+      : rangeDetail.points[channel.id]
+        ? { ...channel, points: rangeDetail.points[channel.id], aggregation: "mean" as const }
+        : channel), [channels, detailPoints, rangeDetail.failed, rangeDetail.loading, rangeDetail.points, selectedIds]);
   const dataRevision = useMemo(
     () => `${latestGlobalMs}|${chartChannels.map((channel) => `${channel.id}:${channel.latestMs}:${channel.points.length}`).join("|")}`,
     [chartChannels, latestGlobalMs],
@@ -1788,10 +1801,12 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
   const mainCooldownEndMs = snapshot.events.find((event) => event.id === "main-cooldown-complete")?.timeMs ?? null;
   const touchDisplayEndMs = Math.min(snapshot.latestGlobalMs, mainCooldownEndMs !== null ? mainCooldownEndMs + 86_400_000 : snapshot.latestGlobalMs);
   const channels = useMemo(() => [touch, oneK].filter(Boolean) as Channel[], [touch, oneK]);
-  const rangeDetail = useShortRangePoints(channels.map((channel) => channel.id), range, touchDisplayEndMs, displayStatistic);
-  const plottedChannels = useMemo(() => channels.map((channel) => rangeDetail.points[channel.id]
-    ? { ...channel, points: rangeDetail.points[channel.id], aggregation: "mean" as const }
-    : channel), [channels, rangeDetail.points]);
+  const rangeDetail = useRangePoints(channels.map((channel) => channel.id), range, touchDisplayEndMs, displayStatistic);
+  const plottedChannels = useMemo(() => channels.map((channel) => rangeDetail.failed || (rangeDetail.loading && !rangeDetail.points[channel.id])
+    ? { ...channel, points: [] }
+    : rangeDetail.points[channel.id]
+      ? { ...channel, points: rangeDetail.points[channel.id], aggregation: "mean" as const }
+      : channel), [channels, rangeDetail.failed, rangeDetail.loading, rangeDetail.points]);
   const activeZoom = zoom?.range === range ? zoom : null;
   const data = useMemo(() => {
     const duration = timeRangeDurations[range];
@@ -2056,19 +2071,21 @@ function CompactWeatherChart({
   const [yDomainOverride, setYDomainOverride] = useState<[number, number] | null>(null);
   const detailRequestRef = useRef(0);
   const hoverPointer = useMemo(() => createHoverPointerStore(), []);
-  const rangeDetail = useShortRangePoints(selectedIds, range, latestGlobalMs, displayStatistic);
+  const rangeDetail = useRangePoints(selectedIds, range, latestGlobalMs, displayStatistic);
   const activeZoom = zoom?.range === range ? zoom : null;
-  const chartChannels = useMemo(() => channels.map((channel) => detailPoints[channel.id]
-    ? { ...channel, points: detailPoints[channel.id] }
-    : rangeDetail.points[channel.id]
-      ? { ...channel, points: rangeDetail.points[channel.id] }
-      : channel), [channels, detailPoints, rangeDetail.points]);
+  const chartChannels = useMemo(() => channels.map((channel) => selectedIds.includes(channel.id) && (rangeDetail.failed || (rangeDetail.loading && !rangeDetail.points[channel.id]))
+    ? { ...channel, points: [] }
+    : detailPoints[channel.id]
+      ? { ...channel, points: detailPoints[channel.id] }
+      : rangeDetail.points[channel.id]
+        ? { ...channel, points: rangeDetail.points[channel.id] }
+        : channel), [channels, detailPoints, rangeDetail.failed, rangeDetail.loading, rangeDetail.points, selectedIds]);
   const data = useMemo(() => {
     const base = mergeChartData(chartChannels, selectedIds, range, latestGlobalMs, undefined, false, 2400, displayStatistic);
     const rows = new Map<number, ChartDatum>(base.map((row) => [row.timeMs, { ...row }]));
     const duration = timeRangeDurations[range];
     const minimum = duration ? latestGlobalMs - duration : Number.NEGATIVE_INFINITY;
-    if (showReference) {
+    if (showReference && !rangeDetail.loading && !rangeDetail.failed) {
       for (const channel of channels.filter((item) => selectedIds.includes(item.id) && !item.id.includes("wind"))) {
         for (const [timeMs, band] of rmsEnvelope(channel, minimum, latestGlobalMs, displayStatistic)) {
           const row = rows.get(timeMs) ?? { timeMs };
@@ -2116,7 +2133,7 @@ function CompactWeatherChart({
       }
     }
     return [...rows.values()].sort((a, b) => a.timeMs - b.timeMs);
-  }, [channels, chartChannels, displayStatistic, selectedIds, range, latestGlobalMs, forecast, showForecast, showForecastHistory, showReference]);
+  }, [channels, chartChannels, displayStatistic, selectedIds, range, latestGlobalMs, forecast, showForecast, showForecastHistory, showReference, rangeDetail.failed, rangeDetail.loading]);
   const displayedData = detailWindow
     ? data.filter((row) => row.timeMs >= detailWindow[0] && row.timeMs <= detailWindow[1])
     : data;
@@ -2232,11 +2249,12 @@ function WindRoseChart({ speedChannel, directionChannel, range, latestGlobalMs, 
   const [densityWindow, setDensityWindow] = useState<WindDensityWindow>("all");
   const [detailPoints, setDetailPoints] = useState<Record<string, ChannelPoint[]>>({});
   const detailRequestRef = useRef(0);
-  const rangeDetail = useShortRangePoints([speedChannel?.id, directionChannel?.id].filter(Boolean) as string[], range, latestGlobalMs, "value");
+  const rangeDetail = useRangePoints([speedChannel?.id, directionChannel?.id].filter(Boolean) as string[], range, latestGlobalMs, "value");
   const rangeDuration = timeRangeDurations[range];
   const recentStartMs = rangeDuration ? latestGlobalMs - rangeDuration : Number.NEGATIVE_INFINITY;
   const withRecentDetail = (channel?: Channel) => {
     if (!channel) return channel;
+    if (rangeDetail.failed || (rangeDetail.loading && !rangeDetail.points[channel.id])) return { ...channel, points: [] };
     const basePoints = detailPoints[channel.id] ?? channel.points;
     const recentPoints = rangeDetail.points[channel.id];
     return recentPoints
