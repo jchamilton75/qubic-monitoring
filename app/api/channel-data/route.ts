@@ -37,6 +37,7 @@ export async function GET(request: Request) {
   const statistic = requestUrl.searchParams.get("statistic") ?? "value";
   const requestedMaxPoints = Number(requestUrl.searchParams.get("maxPoints") ?? 2400);
   const maxPoints = Math.min(6000, Math.max(100, Number.isFinite(requestedMaxPoints) ? Math.floor(requestedMaxPoints) : 2400));
+  const requestedBucketMs = Number(requestUrl.searchParams.get("bucketMs") ?? 0);
 
   if (!ids.length || !Number.isFinite(requestedStartMs) || requestedStartMs < 0 || !Number.isFinite(endMs) || endMs <= requestedStartMs || !allowedStatistics.has(statistic)) {
     return Response.json({ error: "Invalid channel-data request" }, { status: 400 });
@@ -59,7 +60,14 @@ export async function GET(request: Request) {
       WHERE channel_id IN (${placeholders}) AND sample_count > 0
     `).get(...ids)?.firstMs ?? endMs);
     const startMs = requestedStartMs === 0 ? firstDataMs : requestedStartMs;
-    const bucketMs = Math.max(30_000, Math.ceil((endMs - startMs) / maxPoints / 30_000) * 30_000);
+    // Manual resolutions are honored when they fit the response budget. For
+    // long windows, automatically widen the bucket rather than returning an
+    // unbounded number of points and making the browser sluggish.
+    const minimumBucketMs = Math.max(30_000, Math.ceil((endMs - startMs) / maxPoints / 30_000) * 30_000);
+    const requestedBucket = Number.isFinite(requestedBucketMs) && requestedBucketMs > 0
+      ? Math.ceil(requestedBucketMs / 30_000) * 30_000
+      : 30_000;
+    const bucketMs = Math.max(minimumBucketMs, requestedBucket);
     const firstStorageBucketMs = Math.floor(startMs / 30_000) * 30_000;
     const lastStorageBucketMs = Math.floor(endMs / 30_000) * 30_000;
     // Average the stored 30 s means equally, rather than weighting a time

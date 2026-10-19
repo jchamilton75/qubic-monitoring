@@ -5,7 +5,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   Area,
-  Brush,
   CartesianGrid,
   Line,
   LineChart,
@@ -211,6 +210,7 @@ type View = "monitoring" | "cycles" | "compare" | "sources" | "webcams";
 type HousekeepingView = "temperatures" | "pressure" | "touch" | "compressors" | "weather";
 type TimeRange = "1h" | "2h" | "48h" | "7d" | "30d" | "all";
 type DisplayStatistic = "value" | "min" | "max";
+type Averaging = "auto" | "30s" | "1m" | "5m" | "10m" | "30m" | "1h";
 type Language = "en" | "fr" | "es" | "it";
 type DisplayTimeZone = "UTC" | "Europe/Paris" | "America/Argentina/Buenos_Aires";
 
@@ -596,6 +596,22 @@ messages.en.dynamicRefreshing = "Updating the time range; the previous uniformly
 messages.fr.dynamicRefreshing = "Mise à jour de la période ; le tracé précédent, uniformément rééchantillonné, reste affiché un instant…";
 messages.es.dynamicRefreshing = "Actualizando el intervalo; el gráfico anterior, remuestreado uniformemente, permanece visible un momento…";
 messages.it.dynamicRefreshing = "Aggiornamento dell’intervallo; il grafico precedente, ricampionato uniformemente, resta visibile per un momento…";
+for (const [language, labels] of Object.entries({
+  en: ["Averaging", "Automatic", "30 s", "1 min", "5 min", "10 min", "30 min", "1 h"],
+  fr: ["Moyennage", "Automatique", "30 s", "1 min", "5 min", "10 min", "30 min", "1 h"],
+  es: ["Promediado", "Automático", "30 s", "1 min", "5 min", "10 min", "30 min", "1 h"],
+  it: ["Media", "Automatico", "30 s", "1 min", "5 min", "10 min", "30 min", "1 h"],
+}) as Array<[Language, string[]]>) {
+  messages[language].averaging = labels[0];
+  messages[language].averagingInfo = language === "fr"
+    ? "Durée cible des agrégats ; les longues périodes sont automatiquement regroupées pour garder un affichage fluide."
+    : language === "es"
+      ? "Duración objetivo de los agregados; los períodos largos se agrupan automáticamente para mantener una visualización fluida."
+      : language === "it"
+        ? "Durata obiettivo degli aggregati; gli intervalli lunghi vengono raggruppati automaticamente per mantenere fluido il grafico."
+        : "Target bucket width; long windows are automatically coarsened to keep plots responsive.";
+  ["auto", "30s", "1m", "5m", "10m", "30m", "1h"].forEach((id, index) => { messages[language][`averaging.${id}`] = labels[index + 1]; });
+}
 
 const dateFormatterCache = new Map<string, Intl.DateTimeFormat>();
 const numberFormatterCache = new Map<Language, Intl.NumberFormat>();
@@ -1027,7 +1043,9 @@ async function fetchDynamicChannelPoints(
   endMs: number,
   statistic: DisplayStatistic,
   maxPoints = 2400,
+  averaging: Averaging = "auto",
 ) {
+  const averagingMs: Record<Exclude<Averaging, "auto">, number> = { "30s": 30_000, "1m": 60_000, "5m": 300_000, "10m": 600_000, "30m": 1_800_000, "1h": 3_600_000 };
   const query = new URLSearchParams({
     ids: channelIds.join(","),
     start: String(Math.floor(startMs)),
@@ -1035,6 +1053,7 @@ async function fetchDynamicChannelPoints(
     statistic,
     maxPoints: String(maxPoints),
   });
+  if (averaging !== "auto") query.set("bucketMs", String(averagingMs[averaging]));
   const response = await fetch(`/api/channel-data?${query}`, { cache: "no-store" });
   if (!response.ok) throw new Error("Detailed channel data unavailable");
   return await response.json() as DynamicChannelResponse;
@@ -1198,13 +1217,13 @@ const chartPointBudgets: Record<TimeRange, number> = {
   all: 2400,
 };
 
-function useRangePoints(channelIds: string[], range: TimeRange, endMs: number, statistic: DisplayStatistic) {
+function useRangePoints(channelIds: string[], range: TimeRange, endMs: number, statistic: DisplayStatistic, averaging: Averaging = "auto") {
   const [state, setState] = useState<{ key: string; identityKey: string; points: Record<string, ChannelPoint[]>; loading: boolean; failed: boolean; stale?: boolean }>({
     key: "", identityKey: "", points: {}, loading: false, failed: false,
   });
   const channelKey = channelIds.join(",");
   const identityKey = `${channelKey}|${statistic}`;
-  const requestKey = `${identityKey}|${range}|${endMs}`;
+  const requestKey = `${identityKey}|${range}|${endMs}|${averaging}`;
   // The exported overview snapshot intentionally has coarser tiers for old
   // data (30 s / 5 min / a cooldown-wide bucket). Mixing those tiers in one
   // chart creates a false visual change at each tier boundary. Re-query the
@@ -1216,7 +1235,7 @@ function useRangePoints(channelIds: string[], range: TimeRange, endMs: number, s
     if (!shouldLoad) return;
     let current = true;
     const ids = channelKey.split(",");
-    void fetchDynamicChannelPoints(ids, duration ? endMs - duration : 0, endMs, statistic, chartPointBudgets[range])
+    void fetchDynamicChannelPoints(ids, duration ? endMs - duration : 0, endMs, statistic, chartPointBudgets[range], averaging)
       .then((response) => {
         if (current) setState({ key: requestKey, identityKey, points: response.points, loading: false, failed: false });
       })
@@ -1224,7 +1243,7 @@ function useRangePoints(channelIds: string[], range: TimeRange, endMs: number, s
         if (current) setState({ key: requestKey, identityKey, points: {}, loading: false, failed: true });
       });
     return () => { current = false; };
-  }, [channelKey, endMs, identityKey, range, requestKey, shouldLoad, statistic]);
+  }, [averaging, channelKey, endMs, identityKey, range, requestKey, shouldLoad, statistic]);
   if (state.key === requestKey) return { ...state, stale: false };
   // Keep the last successful, uniformly resampled plot visible while another
   // range is fetched. This avoids a blank chart without reviving the mixed-
@@ -1258,6 +1277,13 @@ function DisplayStatisticSelector({ statistic, setStatistic, language }: { stati
       ))}
     </div>
   );
+}
+
+function AveragingSelector({ averaging, setAveraging, language }: { averaging: Averaging; setAveraging: (value: Averaging) => void; language: Language }) {
+  const options: Averaging[] = ["auto", "30s", "1m", "5m", "10m", "30m", "1h"];
+  return <label className="averaging-selector" title={translate(language, "averagingInfo")}><span>{translate(language, "averaging")}</span><select value={averaging} onChange={(event) => setAveraging(event.target.value as Averaging)}>
+    {options.map((option) => <option key={option} value={option}>{translate(language, `averaging.${option}`)}</option>)}
+  </select></label>;
 }
 
 function chartExtent(data: ChartDatum[], keys: string[], logScale = false, xDomain?: [number, number]) {
@@ -1399,27 +1425,42 @@ function yDomainWithSelection(domain: [number, number], selection: YRangeFractio
   return [minimum + lowerFraction * (maximum - minimum), minimum + upperFraction * (maximum - minimum)];
 }
 
-function YAxisRangeBrush({ domain, onCommit, logScale = false, language }: {
+function domainFractions(extent: [number, number], value: [number, number], logScale = false): YRangeFraction {
+  const transform = (number: number) => logScale && extent[0] > 0 && number > 0 ? Math.log10(number) : number;
+  const low = transform(extent[0]); const high = transform(extent[1]);
+  if (!(high > low)) return [0, 1];
+  return [Math.max(0, Math.min(1, (transform(value[0]) - low) / (high - low))), Math.max(0, Math.min(1, (transform(value[1]) - low) / (high - low)))];
+}
+
+function pointTimeExtent(pointsByChannel: Record<string, ChannelPoint[]>, fallback: [number, number]): [number, number] {
+  let minimum = Number.POSITIVE_INFINITY; let maximum = Number.NEGATIVE_INFINITY;
+  for (const points of Object.values(pointsByChannel)) for (const [timeMs] of points) {
+    if (timeMs < minimum) minimum = timeMs;
+    if (timeMs > maximum) maximum = timeMs;
+  }
+  return Number.isFinite(minimum) && maximum > minimum ? [minimum, maximum] : fallback;
+}
+
+function YAxisRangeBrush({ domain, extent = domain, onCommit, logScale = false, language }: {
   domain: [number, number];
+  extent?: [number, number];
   onCommit: (domain: [number, number]) => void;
   logScale?: boolean;
   language: Language;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragHandle, setDragHandle] = useState<"minimum" | "maximum" | null>(null);
-  const [selection, setSelection] = useState<YRangeFraction>([0, 1]);
-  const selectionRef = useRef<YRangeFraction>([0, 1]);
+  const [selection, setSelection] = useState<YRangeFraction>(() => domainFractions(extent, domain, logScale));
   const lower = Math.max(0, Math.min(1, selection[0]));
   const upper = Math.max(lower, Math.min(1, selection[1]));
-  const selectedDomain = yDomainWithSelection(domain, [lower, upper], logScale);
+  const selectedDomain = yDomainWithSelection(extent, [lower, upper], logScale);
   const minimumGap = 0.025;
 
   function updateSelection(next: YRangeFraction) {
-    selectionRef.current = next;
     setSelection(next);
   }
 
-  function selectionFromFraction(handle: "minimum" | "maximum", fraction: number, base = selectionRef.current): YRangeFraction {
+  function selectionFromFraction(handle: "minimum" | "maximum", fraction: number, base = selection): YRangeFraction {
     const next = Math.max(0, Math.min(1, fraction));
     const baseLower = Math.max(0, Math.min(1, base[0]));
     const baseUpper = Math.max(baseLower, Math.min(1, base[1]));
@@ -1431,14 +1472,13 @@ function YAxisRangeBrush({ domain, onCommit, logScale = false, language }: {
   function updateFromFraction(handle: "minimum" | "maximum", fraction: number, commit = false) {
     const next = selectionFromFraction(handle, fraction);
     updateSelection(next);
-    if (commit) onCommit(yDomainWithSelection(domain, next, logScale));
+    if (commit) onCommit(yDomainWithSelection(extent, next, logScale));
   }
 
   function commitSelection() {
-    const next = selectionRef.current;
-    const nextDomain = yDomainWithSelection(domain, next, logScale);
-    if (next[0] > 0 || next[1] < 1) onCommit(nextDomain);
-    updateSelection([0, 1]);
+    const next = selection;
+    const nextDomain = yDomainWithSelection(extent, next, logScale);
+    onCommit(nextDomain);
   }
 
   function fractionFromPointer(clientY: number) {
@@ -1450,15 +1490,15 @@ function YAxisRangeBrush({ domain, onCommit, logScale = false, language }: {
   }
 
   function adjust(handle: "minimum" | "maximum", delta: number) {
-    updateFromFraction(handle, (handle === "minimum" ? selectionRef.current[0] : selectionRef.current[1]) + delta, true);
+    updateFromFraction(handle, (handle === "minimum" ? selection[0] : selection[1]) + delta, true);
   }
 
   function handleKeyDown(handle: "minimum" | "maximum", event: React.KeyboardEvent<HTMLButtonElement>) {
     const step = event.shiftKey ? 0.1 : 0.025;
     if (event.key === "ArrowUp" || event.key === "ArrowRight") { event.preventDefault(); adjust(handle, step); }
     if (event.key === "ArrowDown" || event.key === "ArrowLeft") { event.preventDefault(); adjust(handle, -step); }
-    if (event.key === "Home") { event.preventDefault(); updateFromFraction(handle, handle === "minimum" ? 0 : selectionRef.current[0] + minimumGap, true); }
-    if (event.key === "End") { event.preventDefault(); updateFromFraction(handle, handle === "minimum" ? selectionRef.current[1] - minimumGap : 1, true); }
+    if (event.key === "Home") { event.preventDefault(); updateFromFraction(handle, handle === "minimum" ? 0 : selection[0] + minimumGap, true); }
+    if (event.key === "End") { event.preventDefault(); updateFromFraction(handle, handle === "minimum" ? selection[1] - minimumGap : 1, true); }
   }
 
   return (
@@ -1467,6 +1507,7 @@ function YAxisRangeBrush({ domain, onCommit, logScale = false, language }: {
       ref={trackRef}
       role="group"
       aria-label={translate(language, "yAxis")}
+      onPointerDown={(event) => { event.preventDefault(); }}
       onPointerMove={(event) => {
         if (!dragHandle) return;
         const fraction = fractionFromPointer(event.clientY);
@@ -1479,7 +1520,7 @@ function YAxisRangeBrush({ domain, onCommit, logScale = false, language }: {
         }
         setDragHandle(null);
       }}
-      onPointerCancel={() => { updateSelection([0, 1]); setDragHandle(null); }}
+      onPointerCancel={() => { setDragHandle(null); }}
     >
       <span className="y-axis-brush-label y-axis-brush-label-max">{formatAxisTick(selectedDomain[1], language, logScale)}</span>
       <span className="y-axis-brush-track" />
@@ -1491,9 +1532,9 @@ function YAxisRangeBrush({ domain, onCommit, logScale = false, language }: {
         role="slider"
         aria-label={translate(language, "yMinimum")}
         aria-orientation="vertical"
-        aria-valuemin={domain[0]}
-        aria-valuemax={domain[1]}
-        aria-valuenow={yDomainWithSelection(domain, [lower, lower], logScale)[0]}
+        aria-valuemin={extent[0]}
+        aria-valuemax={extent[1]}
+        aria-valuenow={yDomainWithSelection(extent, [lower, lower], logScale)[0]}
         onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); trackRef.current?.setPointerCapture(event.pointerId); setDragHandle("minimum"); }}
         onKeyDown={(event) => handleKeyDown("minimum", event)}
       />
@@ -1504,15 +1545,53 @@ function YAxisRangeBrush({ domain, onCommit, logScale = false, language }: {
         role="slider"
         aria-label={translate(language, "yMaximum")}
         aria-orientation="vertical"
-        aria-valuemin={domain[0]}
-        aria-valuemax={domain[1]}
-        aria-valuenow={yDomainWithSelection(domain, [upper, upper], logScale)[0]}
+        aria-valuemin={extent[0]}
+        aria-valuemax={extent[1]}
+        aria-valuenow={yDomainWithSelection(extent, [upper, upper], logScale)[0]}
         onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); trackRef.current?.setPointerCapture(event.pointerId); setDragHandle("maximum"); }}
         onKeyDown={(event) => handleKeyDown("maximum", event)}
       />
       <span className="y-axis-brush-label y-axis-brush-label-min">{formatAxisTick(selectedDomain[0], language, logScale)}</span>
     </div>
   );
+}
+
+function XAxisRangeBrush({ domain, extent, onCommit, language }: {
+  domain: [number, number]; extent: [number, number]; onCommit: (domain: [number, number]) => void; language: Language;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [selection, setSelection] = useState<YRangeFraction>(() => domainFractions(extent, domain));
+  const drag = useRef<{ handle: 0 | 1; pointerId: number } | null>(null);
+  const fractions = [Math.min(selection[0], selection[1]), Math.max(selection[0], selection[1])] as YRangeFraction;
+  const fractionAt = (clientX: number) => {
+    const bounds = ref.current?.getBoundingClientRect();
+    return bounds && bounds.width > 0 ? Math.max(0, Math.min(1, (clientX - bounds.left) / bounds.width)) : null;
+  };
+  const setHandle = (index: 0 | 1, value: number) => setSelection((old) => {
+    const next = [...old] as YRangeFraction;
+    const other = next[1 - index];
+    next[index] = index === 0 ? Math.min(value, other - 0.015) : Math.max(value, other + 0.015);
+    next[index] = Math.max(0, Math.min(1, next[index]));
+    return next;
+  });
+  const finish = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!drag.current) return;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    const next = selectionRefValue();
+    onCommit(yDomainWithSelection(extent, next));
+    drag.current = null;
+  };
+  const selectionRefValue = () => fractions;
+  return <div className="x-axis-brush" ref={ref} role="group" aria-label={translate(language, "timeWindow")}
+    onPointerDown={(event) => event.preventDefault()}
+    onPointerMove={(event) => { if (drag.current) { event.preventDefault(); const f = fractionAt(event.clientX); if (f !== null) setHandle(drag.current.handle, f); } }}
+    onPointerUp={finish} onPointerCancel={(event) => { if (drag.current) event.currentTarget.releasePointerCapture(event.pointerId); drag.current = null; }}>
+    <span className="x-axis-brush-track" />
+    <span className="x-axis-brush-selection" style={{ left: `${fractions[0] * 100}%`, width: `${(fractions[1] - fractions[0]) * 100}%` }} />
+    {([0, 1] as const).map((index) => <button key={index} type="button" className="x-axis-brush-handle" style={{ left: `${fractions[index] * 100}%` }} role="slider" aria-orientation="horizontal" aria-label={translate(language, index === 0 ? "timeWindow" : "timeWindow")} aria-valuemin={extent[0]} aria-valuemax={extent[1]} aria-valuenow={yDomainWithSelection(extent, [fractions[index], fractions[index]])[0]}
+      onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); event.currentTarget.parentElement?.setPointerCapture(event.pointerId); drag.current = { handle: index, pointerId: event.pointerId }; }}
+      onKeyDown={(event) => { if (event.key.startsWith("Arrow")) { event.preventDefault(); const f = fractions[index] + (event.shiftKey ? 0.1 : 0.02) * (event.key === "ArrowRight" || event.key === "ArrowUp" ? 1 : -1); setHandle(index, f); const next = [...fractions] as YRangeFraction; next[index] = f; onCommit(yDomainWithSelection(extent, next)); } }} />)}
+  </div>;
 }
 
 function HousekeepingSelector({
@@ -1608,6 +1687,7 @@ function TelemetryChart({
   const [selectedIds, setSelectedIds] = useState<string[]>(defaultIds);
   const [range, setRange] = useState<TimeRange>(initialRange);
   const [displayStatistic, setDisplayStatistic] = useState<DisplayStatistic>("value");
+  const [averaging, setAveraging] = useState<Averaging>("auto");
   const [logScale, setLogScale] = useState(initialLogScale);
   const [zoomMode, setZoomMode] = useState(false);
   const [zoom, setZoom] = useState<ZoomDomain | null>(null);
@@ -1619,7 +1699,7 @@ function TelemetryChart({
   const detailRequestRef = useRef(0);
   const detailTimerRef = useRef<number | null>(null);
   const hoverPointer = useMemo(() => createHoverPointerStore(), []);
-  const rangeDetail = useRangePoints(selectedIds, range, latestGlobalMs, displayStatistic);
+  const rangeDetail = useRangePoints(selectedIds, range, latestGlobalMs, displayStatistic, averaging);
   const chartChannels = useMemo(() => channels.map((channel) => selectedIds.includes(channel.id) && (rangeDetail.failed || (rangeDetail.loading && !rangeDetail.points[channel.id]))
     ? { ...channel, points: [] }
     : detailPoints[channel.id]
@@ -1638,6 +1718,7 @@ function TelemetryChart({
   const displayedData = detailWindow
     ? data.filter((row) => row.timeMs >= detailWindow[0] && row.timeMs <= detailWindow[1])
     : data;
+  const fullXDomain = pointTimeExtent(rangeDetail.points, [data[0]?.timeMs ?? latestGlobalMs - 1, data.at(-1)?.timeMs ?? latestGlobalMs]);
   const units = Array.from(new Set(channels.filter((channel) => selectedIds.includes(channel.id)).map((channel) => channel.unit)));
   const axisUnit = units.length === 1 ? ` ${units[0]}` : "";
   const activeZoom = zoom?.range === range ? zoom : null;
@@ -1654,8 +1735,11 @@ function TelemetryChart({
     ? [Math.max(hardYMinimum, computedYDomain[0]), Math.max(hardYMinimum + Number.EPSILON, computedYDomain[1])]
     : computedYDomain;
   const currentYDomain: [number, number] = yDomainOverride ?? automaticYDomain;
+  const yBrushExtentKey = `${range}|${selectedIds.join(",")}|${displayStatistic}|${logScale}|${latestGlobalMs}`;
+  // Keep the full-Y range stable while detailed X data are loaded.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const yBrushExtent = useMemo(() => automaticYDomain, [yBrushExtentKey]);
   const visibleSpanMs = Math.max(1, currentXDomain[1] - currentXDomain[0]);
-  const fullSpanMs = Math.max(1, (data.at(-1)?.timeMs ?? 1) - (data[0]?.timeMs ?? 0));
   const hoverCurves = useMemo(() => selectedIds.flatMap((id) => {
     const channel = chartChannels.find((item) => item.id === id);
     if (!channel) return [];
@@ -1667,19 +1751,29 @@ function TelemetryChart({
     return [makeHoverCurve(displayedData, id, label, channel.unit, channel.color)];
   }), [chartChannels, displayStatistic, displayedData, language, selectedIds]);
 
-  async function loadDetailedWindow(startMs: number, endMs: number) {
+  async function loadDetailedWindow(startMs: number, endMs: number, resolution = averaging) {
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return;
     const requestId = ++detailRequestRef.current;
     setDetailWindow([startMs, endMs]);
     setDetailPoints({});
     setDetailLoading(true);
     try {
-      const response = await fetchDynamicChannelPoints(selectedIds, startMs, endMs, displayStatistic, Math.max(2400, chartPointBudgets[range] * 2));
+      const response = await fetchDynamicChannelPoints(selectedIds, startMs, endMs, displayStatistic, Math.max(2400, chartPointBudgets[range] * 2), resolution);
       if (requestId === detailRequestRef.current) setDetailPoints(response.points);
     } catch {
       if (requestId === detailRequestRef.current) setDetailPoints({});
     } finally {
       if (requestId === detailRequestRef.current) setDetailLoading(false);
+    }
+  }
+
+  function changeAveraging(resolution: Averaging) {
+    setAveraging(resolution);
+    const visibleWindow = detailWindow ?? (activeZoom ? [activeZoom.xMin, activeZoom.xMax] as [number, number] : null);
+    if (visibleWindow) void loadDetailedWindow(visibleWindow[0], visibleWindow[1], resolution);
+    else {
+      detailRequestRef.current += 1;
+      setDetailPoints({});
     }
   }
 
@@ -1741,27 +1835,18 @@ function TelemetryChart({
               {channels.map((channel) => selectedIds.includes(channel.id) ? (
                 <Line key={channel.id} type={channel.aggregation === "bucket_max_10m" ? "linear" : "monotone"} dataKey={channel.id} name={channel.id} stroke={channel.color} strokeWidth={channel.id === "avs47_1_ch1" || channel.id.endsWith("_pin") ? 2.6 : 1.7} dot={false} activeDot={false} connectNulls isAnimationActive={false} />
               ) : null)}
-              <Brush dataKey="timeMs" height={28} stroke="#4a607d" fill="#0d1828" travellerWidth={8} tickFormatter={(value) => formatCompactDate(value, language, fullSpanMs, timeZone)} onChange={(selection) => {
-                if (typeof selection.startIndex === "number" && typeof selection.endIndex === "number") {
-                  const startMs = displayedData[selection.startIndex]?.timeMs;
-                  const endMs = displayedData[selection.endIndex]?.timeMs;
-                  if (startMs !== undefined && endMs !== undefined && (selection.startIndex > 0 || selection.endIndex < displayedData.length - 1)) {
-                    setYDomainOverride(null);
-                    if (detailTimerRef.current !== null) window.clearTimeout(detailTimerRef.current);
-                    detailTimerRef.current = window.setTimeout(() => void loadDetailedWindow(startMs, endMs), 180);
-                  }
-                }
-              }} />
             </LineChart>
           </ResponsiveContainer>
         ) : <div className="empty-chart">{translate(language, rangeDetail.loading ? (rangeDetail.stale ? "dynamicRefreshing" : "dynamicLoading") : rangeDetail.failed ? "dynamicUnavailable" : "emptyChart")}</div>}
         {displayedData.length ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { const nextZoom = zoomFromSelection(selection, range, currentXDomain, currentYDomain, logScale); setZoom(nextZoom); setYDomainOverride(null); setZoomMode(false); void loadDetailedWindow(nextZoom.xMin, nextZoom.xMax); }} /> : null}
-        {displayedData.length ? <YAxisRangeBrush key={`y-brush-${currentYDomain[0]}-${currentYDomain[1]}`} domain={currentYDomain} onCommit={setYDomainOverride} logScale={logScale} language={language} /> : null}
+        {displayedData.length ? <XAxisRangeBrush key={`${range}|${selectedIds.join(",")}|${displayStatistic}|${averaging}|${zoom?.xMin ?? ""}|${detailWindow?.[0] ?? ""}`} domain={currentXDomain} extent={fullXDomain} onCommit={(domain) => { setYDomainOverride(null); if (detailTimerRef.current !== null) window.clearTimeout(detailTimerRef.current); detailTimerRef.current = window.setTimeout(() => void loadDetailedWindow(domain[0], domain[1]), 180); }} language={language} /> : null}
+        {displayedData.length ? <YAxisRangeBrush key={`${range}|${selectedIds.join(",")}|${displayStatistic}|${logScale}|${latestGlobalMs}|${zoom?.yMin ?? ""}|${yDomainOverride?.[0] ?? ""}`} domain={currentYDomain} extent={yBrushExtent} onCommit={setYDomainOverride} logScale={logScale} language={language} /> : null}
       </div>
       <div className="plot-control-bar">
         <div className="chart-controls">
           <RangeSelector range={range} setRange={(nextRange) => { setRange(nextRange); resetDataZoom(); }} language={language} />
           <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); resetDataZoom(); }} language={language} />
+          <AveragingSelector averaging={averaging} setAveraging={changeAveraging} language={language} />
           <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom || detailWindow || yDomainOverride)} reset={resetDataZoom} language={language} />
           {detailLoading || rangeDetail.loading ? <span className="chart-hint">{translate(language, rangeDetail.stale ? "dynamicRefreshing" : "dynamicLoading")}</span> : rangeDetail.failed ? <span className="chart-hint">{translate(language, "dynamicUnavailable")}</span> : null}
           {allowLogScale ? (
@@ -1796,6 +1881,7 @@ function PressurePanel({ snapshot, language, timeZone }: { snapshot: MonitoringS
 function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnapshot; language: Language; timeZone: DisplayTimeZone }) {
   const [range, setRange] = useState<TimeRange>("all");
   const [displayStatistic, setDisplayStatistic] = useState<DisplayStatistic>("value");
+  const [averaging, setAveraging] = useState<Averaging>("auto");
   const [zoomMode, setZoomMode] = useState(false);
   const [zoom, setZoom] = useState<ZoomDomain | null>(null);
   const [brushRange, setBrushRange] = useState<{ startIndex: number; endIndex: number } | null>(null);
@@ -1807,7 +1893,7 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
   const mainCooldownEndMs = snapshot.events.find((event) => event.id === "main-cooldown-complete")?.timeMs ?? null;
   const touchDisplayEndMs = Math.min(snapshot.latestGlobalMs, mainCooldownEndMs !== null ? mainCooldownEndMs + 86_400_000 : snapshot.latestGlobalMs);
   const channels = useMemo(() => [touch, oneK].filter(Boolean) as Channel[], [touch, oneK]);
-  const rangeDetail = useRangePoints(channels.map((channel) => channel.id), range, touchDisplayEndMs, displayStatistic);
+  const rangeDetail = useRangePoints(channels.map((channel) => channel.id), range, touchDisplayEndMs, displayStatistic, averaging);
   const plottedChannels = useMemo(() => channels.map((channel) => rangeDetail.failed || (rangeDetail.loading && !rangeDetail.points[channel.id])
     ? { ...channel, points: [] }
     : rangeDetail.points[channel.id]
@@ -1844,8 +1930,12 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
     : [brushedData[0]?.timeMs ?? data[0]?.timeMs ?? 0, brushedData.at(-1)?.timeMs ?? data.at(-1)?.timeMs ?? 1];
   const automaticYDomain: [number, number] = activeZoom ? [activeZoom.yMin, activeZoom.yMax] : [0, 1];
   const currentYDomain: [number, number] = yDomainOverride ?? automaticYDomain;
+  const fullXDomain = pointTimeExtent(rangeDetail.points, [data[0]?.timeMs ?? touchDisplayEndMs - 1, data.at(-1)?.timeMs ?? touchDisplayEndMs]);
+  const yBrushExtentKey = `${range}|${channels.map((channel) => channel.id).join(",")}|${displayStatistic}|${touchDisplayEndMs}`;
+  // Keep the full-Y range stable while detailed X data are loaded.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const yBrushExtent = useMemo(() => automaticYDomain, [yBrushExtentKey]);
   const visibleSpanMs = Math.max(1, currentXDomain[1] - currentXDomain[0]);
-  const fullSpanMs = Math.max(1, (data.at(-1)?.timeMs ?? 1) - (data[0]?.timeMs ?? 0));
   const hoverCurves = useMemo(() => plottedChannels.map((channel) => makeHoverCurve(
     data,
     channel.id,
@@ -1905,22 +1995,18 @@ function TouchPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSnap
             <MhsOperationLines events={touchEvents} domain={currentXDomain} language={language} />
             <Tooltip isAnimationActive={false} content={() => null} cursor={<NearestCurveCursor pointerStore={hoverPointer} curves={hoverCurves} xDomain={currentXDomain} yDomain={currentYDomain} language={language} timeZone={timeZone} />} />
             {channels.map((channel) => <Line key={channel.id} type="monotone" dataKey={channel.id} name={channel.id} stroke={channel.color} strokeWidth={channel.id === "avs47_1_ch0" ? 2.2 : 2.8} dot={false} activeDot={false} connectNulls isAnimationActive={false} />)}
-            <Brush dataKey="timeMs" height={28} stroke="#4a607d" fill="#0d1828" travellerWidth={8} tickFormatter={(value) => formatCompactDate(value, language, fullSpanMs, timeZone)} onChange={(selection) => {
-              if (typeof selection.startIndex === "number" && typeof selection.endIndex === "number") {
-                setBrushRange({ startIndex: selection.startIndex, endIndex: selection.endIndex });
-                setYDomainOverride(null);
-              }
-            }} />
           </LineChart>
         </ResponsiveContainer> : <div className="empty-chart">{translate(language, rangeDetail.loading ? (rangeDetail.stale ? "dynamicRefreshing" : "dynamicLoading") : rangeDetail.failed ? "dynamicUnavailable" : "emptyChart")}</div>}
         {data.length ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { setZoom(zoomFromSelection(selection, range, currentXDomain, currentYDomain)); setYDomainOverride(null); setZoomMode(false); }} /> : null}
-        {data.length ? <YAxisRangeBrush key={`y-brush-${currentYDomain[0]}-${currentYDomain[1]}`} domain={currentYDomain} onCommit={setYDomainOverride} language={language} /> : null}
+        {data.length ? <XAxisRangeBrush key={`${range}|${displayStatistic}|${averaging}|${zoom?.xMin ?? ""}`} domain={currentXDomain} extent={fullXDomain} onCommit={(domain) => { setYDomainOverride(null); setZoom({ xMin: domain[0], xMax: domain[1], yMin: currentYDomain[0], yMax: currentYDomain[1], range }); }} language={language} /> : null}
+        {data.length ? <YAxisRangeBrush key={`${range}|${displayStatistic}|${touchDisplayEndMs}|${zoom?.yMin ?? ""}|${yDomainOverride?.[0] ?? ""}`} domain={currentYDomain} extent={yBrushExtent} onCommit={setYDomainOverride} language={language} /> : null}
       </div>
       <div className="plot-control-bar">
         <div className="chart-controls">
           <RangeSelector range={range} setRange={(nextRange) => { setRange(nextRange); setZoom(null); setBrushRange(null); setYDomainOverride(null); }} language={language} />
           {rangeDetail.loading ? <span className="chart-hint">{translate(language, rangeDetail.stale ? "dynamicRefreshing" : "dynamicLoading")}</span> : rangeDetail.failed ? <span className="chart-hint">{translate(language, "dynamicUnavailable")}</span> : null}
           <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); setZoom(null); setBrushRange(null); setYDomainOverride(null); }} language={language} />
+          <AveragingSelector averaging={averaging} setAveraging={setAveraging} language={language} />
           <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom || yDomainOverride)} reset={resetTouchView} language={language} />
         </div>
         <p className="chart-hint">{translate(language, "normalizedSignal")} · 0 → 1</p>
@@ -2070,6 +2156,7 @@ function CompactWeatherChart({
 }) {
   const [selectedIds, setSelectedIds] = useState(() => channels.map((channel) => channel.id));
   const [displayStatistic, setDisplayStatistic] = useState<DisplayStatistic>("value");
+  const [averaging, setAveraging] = useState<Averaging>("auto");
   const [zoomMode, setZoomMode] = useState(false);
   const [zoom, setZoom] = useState<ZoomDomain | null>(null);
   const [detailPoints, setDetailPoints] = useState<Record<string, ChannelPoint[]>>({});
@@ -2077,7 +2164,7 @@ function CompactWeatherChart({
   const [yDomainOverride, setYDomainOverride] = useState<[number, number] | null>(null);
   const detailRequestRef = useRef(0);
   const hoverPointer = useMemo(() => createHoverPointerStore(), []);
-  const rangeDetail = useRangePoints(selectedIds, range, latestGlobalMs, displayStatistic);
+  const rangeDetail = useRangePoints(selectedIds, range, latestGlobalMs, displayStatistic, averaging);
   const activeZoom = zoom?.range === range ? zoom : null;
   const chartChannels = useMemo(() => channels.map((channel) => selectedIds.includes(channel.id) && (rangeDetail.failed || (rangeDetail.loading && !rangeDetail.points[channel.id]))
     ? { ...channel, points: [] }
@@ -2154,6 +2241,11 @@ function CompactWeatherChart({
       : [displayedData[0]?.timeMs ?? 0, displayedData.at(-1)?.timeMs ?? 1];
   const automaticYDomain: [number, number] = activeZoom ? [activeZoom.yMin, activeZoom.yMax] : chartExtent(displayedData, zoomKeys);
   const currentYDomain: [number, number] = yDomainOverride ?? automaticYDomain;
+  const fullXDomain = pointTimeExtent(rangeDetail.points, [data[0]?.timeMs ?? latestGlobalMs - 1, data.at(-1)?.timeMs ?? latestGlobalMs]);
+  const yBrushExtentKey = `${range}|${selectedIds.join(",")}|${displayStatistic}|${latestGlobalMs}`;
+  // Keep the full-Y range stable while detailed X data are loaded.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const yBrushExtent = useMemo(() => automaticYDomain, [yBrushExtentKey]);
   const visibleSpanMs = Math.max(1, currentXDomain[1] - currentXDomain[0]);
   const hoverCurves = useMemo(() => chartChannels.flatMap((channel) => {
     if (!selectedIds.includes(channel.id)) return [];
@@ -2163,16 +2255,26 @@ function CompactWeatherChart({
     return curves;
   }), [chartChannels, displayStatistic, displayedData, language, selectedIds, showForecast]);
 
-  async function loadDetailedWindow(startMs: number, endMs: number) {
+  async function loadDetailedWindow(startMs: number, endMs: number, resolution = averaging) {
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return;
     const requestId = ++detailRequestRef.current;
     setDetailWindow([startMs, endMs]);
     setDetailPoints({});
     try {
-      const response = await fetchDynamicChannelPoints(selectedIds, startMs, endMs, displayStatistic, 2400);
+      const response = await fetchDynamicChannelPoints(selectedIds, startMs, endMs, displayStatistic, 2400, resolution);
       if (requestId === detailRequestRef.current) setDetailPoints(response.points);
     } catch {
       if (requestId === detailRequestRef.current) setDetailPoints({});
+    }
+  }
+
+  function changeAveraging(resolution: Averaging) {
+    setAveraging(resolution);
+    const visibleWindow = detailWindow ?? (activeZoom ? [activeZoom.xMin, activeZoom.xMax] as [number, number] : null);
+    if (visibleWindow) void loadDetailedWindow(visibleWindow[0], visibleWindow[1], resolution);
+    else {
+      detailRequestRef.current += 1;
+      setDetailPoints({});
     }
   }
 
@@ -2223,11 +2325,13 @@ function CompactWeatherChart({
           {showForecastHistory ? (forecast?.history ?? []).slice(-24).flatMap((run) => channels.map((channel) => selectedIds.includes(channel.id) && forecastFields[channel.id] ? <Line key={`forecast-history-${channel.id}-${run.generatedAtMs}`} type="monotone" dataKey={`forecast_history_${channel.id}_${run.generatedAtMs}`} name={`forecast_history_${channel.id}_${run.generatedAtMs}`} stroke={channel.color} strokeOpacity={0.24} strokeWidth={1} strokeDasharray="3 4" dot={false} activeDot={false} connectNulls isAnimationActive={false} /> : null)) : null}
         </LineChart></ResponsiveContainer> : <div className="empty-chart">{translate(language, rangeDetail.loading ? (rangeDetail.stale ? "dynamicRefreshing" : "dynamicLoading") : rangeDetail.failed ? "dynamicUnavailable" : "emptyChart")}</div>}
         {displayedData.length && selectedIds.length ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { const nextZoom = zoomFromSelection(selection, range, currentXDomain, currentYDomain); setZoom(nextZoom); setYDomainOverride(null); setZoomMode(false); void loadDetailedWindow(nextZoom.xMin, nextZoom.xMax); }} /> : null}
-        {displayedData.length && selectedIds.length ? <YAxisRangeBrush key={`y-brush-${currentYDomain[0]}-${currentYDomain[1]}`} domain={currentYDomain} onCommit={setYDomainOverride} language={language} /> : null}
+        {displayedData.length && selectedIds.length ? <YAxisRangeBrush key={`${range}|${selectedIds.join(",")}|${displayStatistic}|${latestGlobalMs}|${zoom?.yMin ?? ""}|${yDomainOverride?.[0] ?? ""}`} domain={currentYDomain} extent={yBrushExtent} onCommit={setYDomainOverride} language={language} /> : null}
+        {displayedData.length && selectedIds.length ? <XAxisRangeBrush domain={currentXDomain} extent={fullXDomain} onCommit={(domain) => { setYDomainOverride(null); void loadDetailedWindow(domain[0], domain[1]); }} language={language} /> : null}
       </div>
       <div className="weather-plot-controls">
         <div className="chart-controls">
           <DisplayStatisticSelector statistic={displayStatistic} setStatistic={(nextStatistic) => { setDisplayStatistic(nextStatistic); resetDataZoom(); }} language={language} />
+          <AveragingSelector averaging={averaging} setAveraging={changeAveraging} language={language} />
           <ZoomControls enabled={zoomMode} setEnabled={setZoomMode} hasZoom={Boolean(activeZoom || detailWindow || yDomainOverride)} reset={resetDataZoom} language={language} />
           {rangeDetail.loading ? <span className="chart-hint">{translate(language, rangeDetail.stale ? "dynamicRefreshing" : "dynamicLoading")}</span> : rangeDetail.failed ? <span className="chart-hint">{translate(language, "dynamicUnavailable")}</span> : null}
         </div>
