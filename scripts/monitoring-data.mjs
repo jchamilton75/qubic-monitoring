@@ -15,6 +15,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
+import { estimateSurfacePwvProxy } from "./weather-metrics.mjs";
 import { spawnSync } from "node:child_process";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
@@ -41,6 +42,8 @@ const compressorOverviewBucketMs = 10 * 60_000;
 const peakPreservingChannelIds = new Set(["avs47_1_ch4", "avs47_1_ch6"]);
 const forecastRefreshIntervalMs = 6 * 3_600_000;
 const forecastRetentionMs = 3 * 365 * 86_400_000;
+const historicalPwvLagDays = 1;
+const instantaneousPwvSampleIntervalMs = 60 * 60_000;
 const qubicSite = { latitude: -24.186971, longitude: -66.478209, elevation: 4869 };
 
 const cooldown = {
@@ -123,6 +126,7 @@ const extraChannels = [
   ["inside_humidity", "Inside humidity", "inside_weather.txt", "weather", "%", 0, 100, "#68b9ff"],
   ["site_temperature", "Site temperature", "weather.txt", "weather", "°C", -60, 60, "#ffb44b"],
   ["site_humidity", "Site humidity", "weather.txt", "weather", "%", 0, 100, "#68b9ff"],
+  ["site_pwv_proxy", "Surface-derived PWV proxy", "weather.txt", "weather", "mm", 0, 100, "#f0a6ff"],
   ["site_pressure", "Site atmospheric pressure", "weather.txt", "weather", "mbar", 400, 800, "#a7e36f"],
   ["site_wind_speed", "Wind speed", "weather.txt", "weather", "km/h", 0, 250, "#e77dff"],
   ["site_wind_direction", "Wind direction", "weather.txt", "weather", "°", 0, 360, "#70d6c7"],
@@ -188,14 +192,16 @@ sourceDefinitions.push(
   },
   {
     id: "site_weather",
+    revision: 2,
     source: `${sourceDirectoryName}/weather.txt`,
-    channelIds: ["site_temperature", "site_humidity", "site_pressure", "site_wind_speed", "site_wind_direction"],
+    channelIds: ["site_temperature", "site_humidity", "site_pwv_proxy", "site_pressure", "site_wind_speed", "site_wind_direction"],
     parse(line) {
       const fields = line.trim().split(/\s+/).map(Number);
       const timeMs = fields[0] * 1000;
       return [
         { channelId: "site_temperature", timeMs, value: fields[1] },
         { channelId: "site_humidity", timeMs, value: fields[2] },
+        { channelId: "site_pwv_proxy", timeMs, value: estimateSurfacePwvProxy(fields[1], fields[2], fields[3]) },
         { channelId: "site_pressure", timeMs, value: fields[3] },
         { channelId: "site_wind_speed", timeMs, value: fields[4] },
         { channelId: "site_wind_direction", timeMs, value: fields[5] },
@@ -290,11 +296,30 @@ function initializeDatabase(database) {
       pressure REAL,
       wind_speed REAL,
       wind_direction REAL,
+      total_column_water_vapour REAL,
       PRIMARY KEY (fetched_at_ms, time_ms)
     ) WITHOUT ROWID;
 
     CREATE INDEX IF NOT EXISTS idx_weather_forecast_time
     ON weather_forecast_points(time_ms, fetched_at_ms);
+
+    CREATE TABLE IF NOT EXISTS weather_pwv_model_history (
+      time_ms INTEGER PRIMARY KEY,
+      value REAL NOT NULL,
+      source TEXT NOT NULL
+    ) WITHOUT ROWID;
+
+    CREATE TABLE IF NOT EXISTS weather_pwv_instantaneous (
+      time_ms INTEGER PRIMARY KEY,
+      sampled_at_ms INTEGER NOT NULL,
+      value REAL NOT NULL,
+      source TEXT NOT NULL
+    ) WITHOUT ROWID;
+
+    CREATE TABLE IF NOT EXISTS weather_pwv_model_history_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      last_attempt_ms INTEGER NOT NULL DEFAULT 0
+    );
 
     CREATE TABLE IF NOT EXISTS ingestion_state (
       source_id TEXT PRIMARY KEY,
@@ -308,6 +333,11 @@ function initializeDatabase(database) {
       invalid_values INTEGER NOT NULL DEFAULT 0
     );
   `);
+
+  const forecastPointColumns = new Set(database.prepare("PRAGMA table_info(weather_forecast_points)").all().map((column) => column.name));
+  if (!forecastPointColumns.has("total_column_water_vapour")) {
+    database.exec("ALTER TABLE weather_forecast_points ADD COLUMN total_column_water_vapour REAL");
+  }
 
   const ingestionColumns = new Set(database.prepare("PRAGMA table_info(ingestion_state)").all().map((column) => column.name));
   if (!ingestionColumns.has("source_revision")) {
@@ -523,7 +553,7 @@ async function maybeStoreWeatherForecast(database) {
     latitude: String(qubicSite.latitude),
     longitude: String(qubicSite.longitude),
     elevation: String(qubicSite.elevation),
-    hourly: "temperature_2m,relative_humidity_2m,surface_pressure,wind_speed_10m,wind_direction_10m",
+    hourly: "temperature_2m,relative_humidity_2m,surface_pressure,wind_speed_10m,wind_direction_10m,total_column_integrated_water_vapour",
     forecast_days: "16",
     timeformat: "unixtime",
     timezone: "UTC",
@@ -543,14 +573,14 @@ async function maybeStoreWeatherForecast(database) {
     const fetchedAtMs = Date.now();
     const insertRun = database.prepare("INSERT INTO weather_forecast_runs (fetched_at_ms, source, latitude, longitude, elevation) VALUES (?, ?, ?, ?, ?)");
     const insertPoint = database.prepare(`
-      INSERT INTO weather_forecast_points (fetched_at_ms, time_ms, temperature, humidity, pressure, wind_speed, wind_direction)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO weather_forecast_points (fetched_at_ms, time_ms, temperature, humidity, pressure, wind_speed, wind_direction, total_column_water_vapour)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
     database.exec("BEGIN");
     try {
       insertRun.run(fetchedAtMs, "Open-Meteo", qubicSite.latitude, qubicSite.longitude, qubicSite.elevation);
       for (let index = 0; index < hourly.time.length; index += 1) {
-        const numberOrNull = (values) => Number.isFinite(Number(values?.[index])) ? Number(values[index]) : null;
+        const numberOrNull = (values) => values?.[index] !== null && values?.[index] !== undefined && Number.isFinite(Number(values[index])) ? Number(values[index]) : null;
         insertPoint.run(
           fetchedAtMs,
           Number(hourly.time[index]) * 1000,
@@ -559,6 +589,7 @@ async function maybeStoreWeatherForecast(database) {
           numberOrNull(hourly.surface_pressure),
           numberOrNull(hourly.wind_speed_10m),
           numberOrNull(hourly.wind_direction_10m),
+          numberOrNull(hourly.total_column_integrated_water_vapour),
         );
       }
       const cutoffMs = fetchedAtMs - forecastRetentionMs;
@@ -573,6 +604,141 @@ async function maybeStoreWeatherForecast(database) {
   } catch (error) {
     console.warn(`Weather forecast archive unavailable: ${error.message}`);
     return { status: "unavailable", fetchedAtMs: previousMs };
+  }
+}
+
+/**
+ * Keep an hourly, model-derived PWV history alongside the surface proxy.
+ * Open-Meteo's Historical Forecast API stitches archived forecast runs into
+ * a past-time series, so this is a model estimate, not a retrospective direct
+ * observation or a climate reanalysis. Re-fetch a small overlap to allow the
+ * provider's most recent archived values to settle.
+ */
+async function maybeStoreHistoricalPwv(database) {
+  const latest = database.prepare("SELECT MAX(time_ms) AS timeMs FROM weather_pwv_model_history").get();
+  const previousAttempt = Number(database.prepare("SELECT last_attempt_ms FROM weather_pwv_model_history_state WHERE id = 1").get()?.last_attempt_ms ?? 0);
+  if (previousAttempt && Date.now() - previousAttempt < 6 * 60 * 60_000) {
+    return { status: "recently attempted", pointCount: 0 };
+  }
+  const now = new Date();
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - historicalPwvLagDays));
+  const endDate = end.toISOString().slice(0, 10);
+  const latestMs = Number(latest?.timeMs ?? 0);
+  if (latestMs && new Date(latestMs).toISOString().slice(0, 10) >= endDate) {
+    return { status: "up to date", pointCount: 0 };
+  }
+
+  const startDate = latestMs
+    ? new Date(Math.max(cooldown.startTimeMs, latestMs - 2 * 86_400_000)).toISOString().slice(0, 10)
+    : new Date(cooldown.startTimeMs).toISOString().slice(0, 10);
+  const parameters = new URLSearchParams({
+    latitude: String(qubicSite.latitude),
+    longitude: String(qubicSite.longitude),
+    elevation: String(qubicSite.elevation),
+    hourly: "total_column_integrated_water_vapour",
+    start_date: startDate,
+    end_date: endDate,
+    timeformat: "unixtime",
+    timezone: "UTC",
+  });
+
+  try {
+    database.prepare(`
+      INSERT INTO weather_pwv_model_history_state (id, last_attempt_ms) VALUES (1, ?)
+      ON CONFLICT(id) DO UPDATE SET last_attempt_ms=excluded.last_attempt_ms
+    `).run(Date.now());
+    const response = await fetch(`https://historical-forecast-api.open-meteo.com/v1/forecast?${parameters}`, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) return { status: "unavailable", pointCount: 0 };
+    const payload = await response.json();
+    const hourly = payload?.hourly;
+    if (!Array.isArray(hourly?.time) || !Array.isArray(hourly?.total_column_integrated_water_vapour)) {
+      return { status: "unavailable", pointCount: 0 };
+    }
+
+    const insertPoint = database.prepare(`
+      INSERT INTO weather_pwv_model_history (time_ms, value, source)
+      VALUES (?, ?, ?)
+      ON CONFLICT(time_ms) DO UPDATE SET value=excluded.value, source=excluded.source
+    `);
+    let pointCount = 0;
+    database.exec("BEGIN");
+    try {
+      for (let index = 0; index < hourly.time.length; index += 1) {
+        const value = hourly.total_column_integrated_water_vapour[index];
+        if (value === null || value === undefined || !Number.isFinite(Number(value))) continue;
+        insertPoint.run(Number(hourly.time[index]) * 1000, Number(value), "Open-Meteo Historical Forecast API");
+        pointCount += 1;
+      }
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+    return { status: "stored", pointCount, startDate, endDate };
+  } catch (error) {
+    console.warn(`Historical model PWV unavailable: ${error.message}`);
+    return { status: "unavailable", pointCount: 0 };
+  }
+}
+
+/** Save one current-hour PWV sample per hour from Open-Meteo's hourly model series. */
+async function maybeStoreInstantaneousPwv(database) {
+  const previous = database.prepare("SELECT MAX(sampled_at_ms) AS sampledAtMs FROM weather_pwv_instantaneous").get();
+  const previousMs = Number(previous?.sampledAtMs ?? 0);
+  if (previousMs && Date.now() - previousMs < instantaneousPwvSampleIntervalMs) {
+    return { status: "not due", pointCount: 0 };
+  }
+
+  const parameters = new URLSearchParams({
+    latitude: String(qubicSite.latitude),
+    longitude: String(qubicSite.longitude),
+    elevation: String(qubicSite.elevation),
+    hourly: "total_column_integrated_water_vapour",
+    forecast_days: "1",
+    timeformat: "unixtime",
+    timezone: "UTC",
+  });
+
+  try {
+    const response = await fetch(`https://api.open-meteo.com/v1/forecast?${parameters}`, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) return { status: "unavailable", pointCount: 0 };
+    const payload = await response.json();
+    const hourly = payload?.hourly;
+    if (!Array.isArray(hourly?.time) || !Array.isArray(hourly?.total_column_integrated_water_vapour)) {
+      return { status: "unavailable", pointCount: 0 };
+    }
+
+    const nowMs = Date.now();
+    const currentHourMs = Math.floor(nowMs / 3_600_000) * 3_600_000;
+    let bestIndex = -1;
+    let bestDistance = Infinity;
+    for (let index = 0; index < hourly.time.length; index += 1) {
+      const timestampMs = Number(hourly.time[index]) * 1000;
+      const value = hourly.total_column_integrated_water_vapour[index];
+      const distance = Math.abs(timestampMs - currentHourMs);
+      if (distance < bestDistance && distance <= 30 * 60_000 && value !== null && value !== undefined && Number.isFinite(Number(value))) {
+        bestIndex = index;
+        bestDistance = distance;
+      }
+    }
+    if (bestIndex < 0) return { status: "unavailable", pointCount: 0 };
+
+    const timeMs = Number(hourly.time[bestIndex]) * 1000;
+    database.prepare(`
+      INSERT INTO weather_pwv_instantaneous (time_ms, sampled_at_ms, value, source)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(time_ms) DO UPDATE SET sampled_at_ms=excluded.sampled_at_ms, value=excluded.value, source=excluded.source
+    `).run(timeMs, nowMs, Number(hourly.total_column_integrated_water_vapour[bestIndex]), "Open-Meteo Forecast API · hourly PWV sample");
+    return { status: "stored", pointCount: 1, timeMs };
+  } catch (error) {
+    console.warn(`Instantaneous model PWV unavailable: ${error.message}`);
+    return { status: "unavailable", pointCount: 0 };
   }
 }
 
@@ -718,10 +884,12 @@ export async function refreshMonitoringData() {
   try {
     for (const source of sourceDefinitions) results.push(await ingestSource(database, source));
     const forecast = await maybeStoreWeatherForecast(database);
+    const historicalPwv = await maybeStoreHistoricalPwv(database);
+    const instantaneousPwv = await maybeStoreInstantaneousPwv(database);
     const analysis = runPythonAnalysis();
     const snapshot = exportSnapshot(database, analysis);
     database.exec("PRAGMA optimize");
-    return { databasePath, snapshotPath, results, snapshot, forecast };
+    return { databasePath, snapshotPath, results, snapshot, forecast, historicalPwv, instantaneousPwv };
   } finally {
     database.close();
   }
@@ -735,4 +903,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   console.log(`Database: ${result.databasePath}`);
   console.log(`Snapshot: ${result.snapshotPath}`);
   if (result.forecast?.status === "stored") console.log(`Weather forecast archive: stored ${result.forecast.pointCount} hourly point(s)`);
+  if (result.historicalPwv?.status === "stored") console.log(`Historical model PWV: stored ${result.historicalPwv.pointCount} hourly point(s)`);
+  if (result.instantaneousPwv?.status === "stored") console.log(`Open-Meteo PWV sample: stored ${new Date(result.instantaneousPwv.timeMs).toISOString()}`);
 }

@@ -12,6 +12,7 @@ type OpenMeteoResponse = {
     surface_pressure?: Array<number | null>;
     wind_speed_10m?: Array<number | null>;
     wind_direction_10m?: Array<number | null>;
+    total_column_integrated_water_vapour?: Array<number | null>;
   };
 };
 
@@ -50,7 +51,8 @@ function readForecastHistory() {
     const placeholders = runs.map(() => "?").join(",");
     const points = database.prepare(`
       SELECT fetched_at_ms AS fetchedAtMs, time_ms AS timeMs,
-        temperature, humidity, pressure, wind_speed AS windSpeed, wind_direction AS windDirection
+        temperature, humidity, pressure, wind_speed AS windSpeed, wind_direction AS windDirection,
+        total_column_water_vapour AS pwv
       FROM weather_forecast_points
       WHERE fetched_at_ms IN (${placeholders})
       ORDER BY fetched_at_ms, time_ms
@@ -66,8 +68,48 @@ function readForecastHistory() {
         pressure: point.pressure,
         windSpeed: point.windSpeed,
         windDirection: point.windDirection,
+        pwv: point.pwv,
       })),
     }));
+  } catch {
+    return [];
+  } finally {
+    database?.close();
+  }
+}
+
+function readHistoricalPwv() {
+  const sourceDirectoryName = process.env.QUBIC_COOLDOWN_DIR ?? "June2026";
+  const path = join(projectDirectory(), ".local", `qubic-monitoring-${cooldownId(sourceDirectoryName)}-v2.sqlite`);
+  if (!existsSync(path)) return [];
+  let database: DatabaseSync | undefined;
+  try {
+    database = new DatabaseSync(path, { readOnly: true });
+    return database.prepare(`
+      SELECT time_ms AS timeMs, value AS pwv
+      FROM weather_pwv_model_history
+      ORDER BY time_ms
+    `).all() as Array<{ timeMs: number; pwv: number }>;
+  } catch {
+    // The local collector may not yet have run the migration/backfill.
+    return [];
+  } finally {
+    database?.close();
+  }
+}
+
+function readInstantaneousPwv() {
+  const sourceDirectoryName = process.env.QUBIC_COOLDOWN_DIR ?? "June2026";
+  const path = join(projectDirectory(), ".local", `qubic-monitoring-${cooldownId(sourceDirectoryName)}-v2.sqlite`);
+  if (!existsSync(path)) return [];
+  let database: DatabaseSync | undefined;
+  try {
+    database = new DatabaseSync(path, { readOnly: true });
+    return database.prepare(`
+      SELECT time_ms AS timeMs, value AS pwv
+      FROM weather_pwv_instantaneous
+      ORDER BY time_ms
+    `).all() as Array<{ timeMs: number; pwv: number }>;
   } catch {
     return [];
   } finally {
@@ -80,7 +122,7 @@ export async function GET() {
     latitude: String(qubicSite.latitude),
     longitude: String(qubicSite.longitude),
     elevation: String(qubicSite.elevation),
-    hourly: "temperature_2m,relative_humidity_2m,surface_pressure,wind_speed_10m,wind_direction_10m",
+    hourly: "temperature_2m,relative_humidity_2m,surface_pressure,wind_speed_10m,wind_direction_10m,total_column_integrated_water_vapour",
     forecast_days: "16",
     timeformat: "unixtime",
     timezone: "UTC",
@@ -103,6 +145,7 @@ export async function GET() {
       pressure: hourly.surface_pressure?.[index] ?? null,
       windSpeed: hourly.wind_speed_10m?.[index] ?? null,
       windDirection: hourly.wind_direction_10m?.[index] ?? null,
+      pwv: hourly.total_column_integrated_water_vapour?.[index] ?? null,
     }));
 
     return Response.json({
@@ -111,6 +154,8 @@ export async function GET() {
       site: qubicSite,
       points,
       history: readForecastHistory(),
+      modelHistory: readHistoricalPwv(),
+      instantaneousPwv: readInstantaneousPwv(),
     }, {
       headers: { "Cache-Control": "public, max-age=900, stale-while-revalidate=1800" },
     });

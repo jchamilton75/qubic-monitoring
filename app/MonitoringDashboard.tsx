@@ -17,6 +17,7 @@ import {
 } from "recharts";
 
 type ChannelStatus = "fresh" | "delayed" | "stale" | "missing";
+const PWV_FORECAST_COLOR = "#ff6b6b";
 
 // Point tuples carry the displayed value plus the raw extrema covered by the
 // same aggregate bucket. Existing consumers can keep using [0] and [1], while
@@ -135,6 +136,7 @@ type ForecastPoint = {
   pressure: number | null;
   windSpeed: number | null;
   windDirection: number | null;
+  pwv: number | null;
 };
 
 type WeatherForecast = {
@@ -142,6 +144,8 @@ type WeatherForecast = {
   source: string;
   points: ForecastPoint[];
   history?: ForecastRun[];
+  modelHistory?: Array<{ timeMs: number; pwv: number }>;
+  instantaneousPwv?: Array<{ timeMs: number; pwv: number }>;
 };
 
 type ForecastRun = {
@@ -313,11 +317,26 @@ const messages: Record<Language, Record<string, string>> = {
     initialStartup: "Initial start",
     weatherTitle: "Weather at Alto Chorrillos",
     weatherCopy: "Outside weather and indoor conditions, including atmospheric pressure, wind speed and wind direction.",
+    pwvProxyNote: "Three PWV estimates are shown: a surface proxy calculated from QUBIC's local weather measurements; an hourly historical model series from Open-Meteo; and a progressively collected hourly Open-Meteo model value. The Forecast control separately shows the future forecast, as it does for the other weather plots. Model series are estimates, not direct measurements.",
+    pwvFormulaLabel: "Surface-proxy formula",
+    pwvFormulaUnits: "T in °C, RH in %, p in hPa; H = 2 km and Rᵈ = 287.05 J kg⁻¹ K⁻¹. This fixed-profile assumption makes the proxy indicative, not an absolute PWV retrieval.",
+    modelPwvLabel: "Model-derived PWV estimate",
+    historicalModel: "Historical Open-Meteo PWV",
+    instantaneousModel: "Collected Open-Meteo PWV",
+    pwvSurfaceSource: "Calculated from QUBIC site-weather data",
+    pwvHistoricalSource: "Open-Meteo Historical Forecast API",
+    pwvInstantaneousSource: "Open-Meteo Forecast API · 1 sample/hour",
+    historicalPwvUnavailable: "Historical model PWV is not available yet; run the data refresh to populate the archive.",
+    instantaneousPwvUnavailable: "The hourly Open-Meteo series will build up as the collector runs.",
+    pwvSourceLinks: "Open-Meteo API documentation",
+    modelPwvSource: "Historical series: Open-Meteo Historical Forecast API. Progressively collected series: Open-Meteo Forecast API, one hourly PWV sample stored per hour by the data collector. Variable: total_column_integrated_water_vapour. The separate Forecast control displays future model values. The provider automatically selects the best available weather model for the location; values are in kg/m² (approximately mm of liquid water). QUBIC site: 24.187°S, 66.478°W, 4,869 m.",
+    modelPwvUnavailable: "The weather model did not return PWV values for this update.",
     forecast: "Forecast",
     forecastHistory: "Past forecasts",
     forecastHistoryCopy: "Archived forecasts issued during this cooldown",
     forecastUnavailable: "Forecast temporarily unavailable",
     forecastSource: "Open-Meteo forecast · QUBIC coordinates and 4,869 m elevation",
+    "channel.site_pwv_proxy": "Surface-derived PWV proxy",
     diurnalReference: "7-day RMS envelope",
     diurnalReferenceCopy: "Transparent ± RMS envelope centred on the current curve, estimated from the previous 7 days",
     expectedPattern: "7-day RMS envelope",
@@ -592,6 +611,54 @@ messages.es.dynamicLoading = "Cargando datos remuestreados uniformemente para es
 messages.es.dynamicUnavailable = "No hay datos coherentes para este intervalo; se oculta el gráfico para evitar cambios engañosos de resolución.";
 messages.it.dynamicLoading = "Caricamento dei dati ricampionati uniformemente per questo intervallo…";
 messages.it.dynamicUnavailable = "I dati coerenti per questo intervallo non sono disponibili; il grafico è nascosto per evitare cambiamenti fuorvianti di risoluzione.";
+messages.fr.pwvProxyNote = "Le proxy de PWV issu des mesures de surface suppose une décroissance exponentielle de la vapeur d’eau avec une hauteur d’échelle de 2 km ; ce n’est pas une mesure directe. Le modèle fournit la vapeur d’eau intégrée sur la colonne (kg/m², numériquement équivalents aux mm d’eau liquide).";
+messages.es.pwvProxyNote = "El proxy de PWV derivado de mediciones en superficie supone que el vapor de agua disminuye exponencialmente con una altura de escala de 2 km; no es una medición directa. El modelo proporciona vapor de agua integrado en toda la columna (kg/m², numéricamente equivalente a mm de agua líquida).";
+messages.it.pwvProxyNote = "Il proxy di PWV derivato dalle misure al suolo presume che il vapore acqueo diminuisca esponenzialmente con un’altezza di scala di 2 km; non è una misura diretta. Il modello fornisce il vapore acqueo integrato sull’intera colonna (kg/m², numericamente equivalente a mm di acqua liquida).";
+messages.fr.pwvProxyNote = "Trois estimations de PWV sont affichées : le proxy de surface calculé à partir des mesures météo locales de QUBIC, l’historique horaire du modèle Open‑Meteo et la série horaire Open‑Meteo enregistrée progressivement par le collecteur. Le contrôle Forecast affiche séparément la prévision future, comme pour les autres graphiques météo. Les séries du modèle sont des estimations, pas des mesures directes.";
+messages.es.pwvProxyNote = "Se muestran tres estimaciones de PWV: el proxy de superficie calculado con las mediciones meteorológicas locales de QUBIC, la serie histórica horaria del modelo Open-Meteo y la serie horaria de Open-Meteo que el colector va guardando. El control Forecast muestra por separado el pronóstico futuro, igual que en los demás gráficos meteorológicos. Las series del modelo son estimaciones, no mediciones directas.";
+messages.it.pwvProxyNote = "Sono mostrate tre stime di PWV: il proxy di superficie calcolato dalle misure meteorologiche locali di QUBIC, la serie storica oraria del modello Open-Meteo e la serie oraria Open-Meteo registrata progressivamente dal collector. Il controllo Forecast mostra separatamente le previsioni future, come negli altri grafici meteo. Le serie del modello sono stime, non misure dirette.";
+messages.fr.pwvFormulaLabel = "Formule du proxy de surface";
+messages.fr.pwvFormulaUnits = "T en °C, HR en %, p en hPa ; H = 2 km et Rᵈ = 287,05 J kg⁻¹ K⁻¹. Ce profil fixé donne un indicateur, pas une mesure absolue de PWV.";
+messages.es.pwvFormulaLabel = "Fórmula del proxy de superficie";
+messages.es.pwvFormulaUnits = "T en °C, HR en %, p en hPa; H = 2 km y Rᵈ = 287,05 J kg⁻¹ K⁻¹. Este perfil supuesto da un indicador, no una medición absoluta de PWV.";
+messages.it.pwvFormulaLabel = "Formula del proxy di superficie";
+messages.it.pwvFormulaUnits = "T in °C, UR in %, p in hPa; H = 2 km e Rᵈ = 287,05 J kg⁻¹ K⁻¹. Questo profilo assunto fornisce un indicatore, non una misura assoluta di PWV.";
+messages.fr.modelPwvLabel = "Estimation de PWV par modèle";
+messages.fr.modelPwvUnavailable = "Le modèle météo n’a pas fourni de valeur de PWV pour cette mise à jour.";
+messages.es.modelPwvLabel = "Estimación de PWV del modelo";
+messages.es.modelPwvUnavailable = "El modelo meteorológico no devolvió valores de PWV en esta actualización.";
+messages.it.modelPwvLabel = "Stima di PWV da modello";
+messages.it.modelPwvUnavailable = "Il modello meteorologico non ha restituito valori di PWV per questo aggiornamento.";
+messages.fr.modelPwvSource = "Série historique : API Historical Forecast d’Open‑Meteo. Série collectée progressivement : API Forecast d’Open‑Meteo, un point PWV horaire enregistré par le collecteur. Variable : total_column_integrated_water_vapour. Le bouton Forecast affiche séparément les valeurs futures du modèle. Le fournisseur sélectionne automatiquement le modèle météo disponible le mieux adapté au site ; valeurs en kg/m² (environ mm d’eau liquide). Site QUBIC : 24,187°S, 66,478°O, 4 869 m.";
+messages.es.modelPwvSource = "Serie histórica: API Historical Forecast de Open-Meteo. Serie recopilada progresivamente: API Forecast de Open-Meteo, con un punto horario de PWV guardado por el colector. Variable: total_column_integrated_water_vapour. El control Forecast muestra por separado los valores futuros. El proveedor selecciona automáticamente el modelo meteorológico disponible más adecuado; valores en kg/m² (aprox. mm de agua líquida). Sitio QUBIC: 24,187°S, 66,478°O, 4869 m.";
+messages.it.modelPwvSource = "Serie storica: API Historical Forecast di Open-Meteo. Serie raccolta progressivamente: API Forecast di Open-Meteo, con un punto PWV orario salvato dal collector. Variabile: total_column_integrated_water_vapour. Il controllo Forecast mostra separatamente i valori futuri. Il fornitore seleziona automaticamente il modello meteorologico disponibile più adatto; valori in kg/m² (circa mm di acqua liquida). Sito QUBIC: 24,187°S, 66,478°O, 4869 m.";
+messages.fr.historicalModel = "modèle historique";
+messages.es.historicalModel = "modelo histórico";
+messages.it.historicalModel = "modello storico";
+messages.fr.instantaneousModel = "PWV Open‑Meteo collectée";
+messages.es.instantaneousModel = "PWV de Open-Meteo recopilada";
+messages.it.instantaneousModel = "PWV Open-Meteo raccolta";
+messages.fr.pwvSurfaceSource = "Calculé depuis les données météo locales de QUBIC";
+messages.es.pwvSurfaceSource = "Calculado a partir de los datos meteorológicos locales de QUBIC";
+messages.it.pwvSurfaceSource = "Calcolato dai dati meteo locali di QUBIC";
+messages.fr.pwvHistoricalSource = "API Historical Forecast d’Open‑Meteo";
+messages.es.pwvHistoricalSource = "API Historical Forecast de Open-Meteo";
+messages.it.pwvHistoricalSource = "API Historical Forecast di Open-Meteo";
+messages.fr.pwvInstantaneousSource = "API Forecast d’Open‑Meteo · 1 point/heure";
+messages.es.pwvInstantaneousSource = "API Forecast de Open-Meteo · 1 punto/hora";
+messages.it.pwvInstantaneousSource = "API Forecast di Open-Meteo · 1 punto/ora";
+messages.fr.historicalPwvUnavailable = "La série PWV historique du modèle n’est pas encore disponible ; lancez la mise à jour des données pour remplir l’archive.";
+messages.es.historicalPwvUnavailable = "La serie histórica de PWV del modelo aún no está disponible; ejecute la actualización de datos para completar el archivo.";
+messages.it.historicalPwvUnavailable = "La serie storica di PWV del modello non è ancora disponibile; avviare l’aggiornamento dei dati per popolare l’archivio.";
+messages.fr.instantaneousPwvUnavailable = "La série horaire Open‑Meteo se constituera progressivement au fil des mises à jour du collecteur.";
+messages.es.instantaneousPwvUnavailable = "La serie horaria de Open-Meteo se irá formando a medida que se actualice el colector.";
+messages.it.instantaneousPwvUnavailable = "La serie oraria Open-Meteo si formerà progressivamente con gli aggiornamenti del collector.";
+messages.fr.pwvSourceLinks = "Documentation des API Open‑Meteo";
+messages.es.pwvSourceLinks = "Documentación de las API de Open-Meteo";
+messages.it.pwvSourceLinks = "Documentazione delle API Open-Meteo";
+messages.fr["channel.site_pwv_proxy"] = "Proxy de PWV dérivé de la surface";
+messages.es["channel.site_pwv_proxy"] = "Proxy de PWV derivado de superficie";
+messages.it["channel.site_pwv_proxy"] = "Proxy di PWV derivato dalla superficie";
 messages.en.dynamicRefreshing = "Updating the time range; the previous uniformly sampled plot remains visible briefly…";
 messages.fr.dynamicRefreshing = "Mise à jour de la période ; le tracé précédent, uniformément rééchantillonné, reste affiché un instant…";
 messages.es.dynamicRefreshing = "Actualizando el intervalo; el gráfico anterior, remuestreado uniformemente, permanece visible un momento…";
@@ -2050,6 +2117,7 @@ const forecastFields: Record<string, keyof Omit<ForecastPoint, "timeMs">> = {
   site_pressure: "pressure",
   site_wind_speed: "windSpeed",
   site_wind_direction: "windDirection",
+  site_pwv_proxy: "pwv",
 };
 
 function forecastHorizon(range: TimeRange) {
@@ -2154,7 +2222,15 @@ function CompactWeatherChart({
   showForecastHistory: boolean;
   showReference: boolean;
 }) {
+  const isPwvChart = channels.some((channel) => channel.id === "site_pwv_proxy");
   const [selectedIds, setSelectedIds] = useState(() => channels.map((channel) => channel.id));
+  const [pwvVisibility, setPwvVisibility] = useState({ surface: true, historical: true, instantaneous: true });
+  const maximumForecastMs = latestGlobalMs + forecastHorizon(range);
+  const hasPwvForecast = showForecast && Boolean(forecast?.points.some((point) => point.timeMs > latestGlobalMs && point.timeMs <= maximumForecastMs && typeof point.pwv === "number" && Number.isFinite(point.pwv)));
+  const hasVisibleSeries = isPwvChart
+    ? Object.values(pwvVisibility).some(Boolean) || hasPwvForecast
+    : selectedIds.length > 0;
+  const visibleSelectedIds = useMemo(() => isPwvChart && !pwvVisibility.surface ? [] : selectedIds, [isPwvChart, pwvVisibility.surface, selectedIds]);
   const [displayStatistic, setDisplayStatistic] = useState<DisplayStatistic>("value");
   const [averaging, setAveraging] = useState<Averaging>("auto");
   const [zoomMode, setZoomMode] = useState(false);
@@ -2174,12 +2250,28 @@ function CompactWeatherChart({
         ? { ...channel, points: rangeDetail.points[channel.id] }
         : channel), [channels, detailPoints, rangeDetail.failed, rangeDetail.loading, rangeDetail.points, selectedIds]);
   const data = useMemo(() => {
-    const base = mergeChartData(chartChannels, selectedIds, range, latestGlobalMs, undefined, false, 2400, displayStatistic);
+    const base = mergeChartData(chartChannels, visibleSelectedIds, range, latestGlobalMs, undefined, false, 2400, displayStatistic);
     const rows = new Map<number, ChartDatum>(base.map((row) => [row.timeMs, { ...row }]));
     const duration = timeRangeDurations[range];
     const minimum = duration ? latestGlobalMs - duration : Number.NEGATIVE_INFINITY;
+    if (isPwvChart && pwvVisibility.historical && forecast?.modelHistory?.length) {
+      for (const point of forecast.modelHistory) {
+        if (point.timeMs < minimum || point.timeMs > latestGlobalMs || !Number.isFinite(point.pwv)) continue;
+        const row = rows.get(point.timeMs) ?? { timeMs: point.timeMs };
+        row.model_history_site_pwv_proxy = point.pwv;
+        rows.set(point.timeMs, row);
+      }
+    }
+    if (isPwvChart && pwvVisibility.instantaneous && forecast?.instantaneousPwv?.length) {
+      for (const point of forecast.instantaneousPwv) {
+        if (point.timeMs < minimum || point.timeMs > latestGlobalMs || !Number.isFinite(point.pwv)) continue;
+        const row = rows.get(point.timeMs) ?? { timeMs: point.timeMs };
+        row.model_instantaneous_site_pwv_proxy = point.pwv;
+        rows.set(point.timeMs, row);
+      }
+    }
     if (showReference && !rangeDetail.loading && !rangeDetail.failed) {
-      for (const channel of channels.filter((item) => selectedIds.includes(item.id) && !item.id.includes("wind"))) {
+      for (const channel of channels.filter((item) => visibleSelectedIds.includes(item.id) && !item.id.includes("wind"))) {
         for (const [timeMs, band] of rmsEnvelope(channel, minimum, latestGlobalMs, displayStatistic)) {
           const row = rows.get(timeMs) ?? { timeMs };
           row[`band_${channel.id}`] = band;
@@ -2193,7 +2285,10 @@ function CompactWeatherChart({
       for (const point of forecast.points) {
         if (point.timeMs <= latestGlobalMs || point.timeMs > maximumForecastMs) continue;
         const row = rows.get(point.timeMs) ?? { timeMs: point.timeMs };
-        for (const channel of chartChannels.filter((item) => selectedIds.includes(item.id))) {
+        const forecastChannels = isPwvChart
+          ? chartChannels.filter((item) => item.id === "site_pwv_proxy")
+          : chartChannels.filter((item) => visibleSelectedIds.includes(item.id));
+        for (const channel of forecastChannels) {
           const field = forecastFields[channel.id];
           const value = field ? point[field] : null;
           if (typeof value === "number" && Number.isFinite(value)) {
@@ -2204,7 +2299,7 @@ function CompactWeatherChart({
         rows.set(point.timeMs, row);
       }
     }
-    if (showForecastHistory && forecast?.history?.length) {
+    if (showForecastHistory && forecast?.history?.length && !isPwvChart) {
       // Keep the overlay deliberately bounded: archived runs are hourly and a
       // full cooldown may contain years of forecasts. The latest 24 runs are
       // enough to compare forecast drift without turning the chart into a
@@ -2226,14 +2321,21 @@ function CompactWeatherChart({
       }
     }
     return [...rows.values()].sort((a, b) => a.timeMs - b.timeMs);
-  }, [channels, chartChannels, displayStatistic, selectedIds, range, latestGlobalMs, forecast, showForecast, showForecastHistory, showReference, rangeDetail.failed, rangeDetail.loading]);
+  }, [channels, chartChannels, displayStatistic, selectedIds, visibleSelectedIds, isPwvChart, pwvVisibility, range, latestGlobalMs, forecast, showForecast, showForecastHistory, showReference, rangeDetail.failed, rangeDetail.loading]);
   const displayedData = detailWindow
     ? data.filter((row) => row.timeMs >= detailWindow[0] && row.timeMs <= detailWindow[1])
     : data;
-  const historyKeys = showForecastHistory
+  const historyKeys = showForecastHistory && !isPwvChart
     ? (forecast?.history ?? []).slice(-24).flatMap((run) => selectedIds.map((id) => `forecast_history_${id}_${run.generatedAtMs}`))
     : [];
-  const zoomKeys = selectedIds.flatMap((id) => [id, ...(showReference ? [`band_${id}`] : []), ...(showForecast ? [`forecast_${id}`] : [])]).concat(historyKeys);
+  const zoomKeys = isPwvChart
+    ? [
+      ...(pwvVisibility.surface ? ["site_pwv_proxy", ...(showReference ? ["band_site_pwv_proxy"] : [])] : []),
+      ...(pwvVisibility.historical ? ["model_history_site_pwv_proxy"] : []),
+      ...(pwvVisibility.instantaneous ? ["model_instantaneous_site_pwv_proxy"] : []),
+      ...(showForecast ? ["forecast_site_pwv_proxy"] : []),
+    ]
+    : selectedIds.flatMap((id) => [id, ...(showReference ? [`band_${id}`] : []), ...(showForecast ? [`forecast_${id}`] : [])]).concat(historyKeys);
   const currentXDomain: [number, number] = activeZoom
     ? [activeZoom.xMin, activeZoom.xMax]
     : detailWindow
@@ -2250,10 +2352,16 @@ function CompactWeatherChart({
   const hoverCurves = useMemo(() => chartChannels.flatMap((channel) => {
     if (!selectedIds.includes(channel.id)) return [];
     const measuredLabel = `${channelName(channel, language)}${displayStatistic === "value" ? "" : ` · ${statisticLabel(displayStatistic, language)}`}`;
-    const curves = [makeHoverCurve(displayedData, channel.id, measuredLabel, channel.unit, channel.color)];
-    if (showForecast && forecastFields[channel.id]) curves.push(makeHoverCurve(displayedData, `forecast_${channel.id}`, `${channelName(channel, language)} · ${translate(language, "forecast")}`, channel.unit, channel.color));
+    const isPwv = channel.id === "site_pwv_proxy";
+    const curves = isPwv ? [] : [makeHoverCurve(displayedData, channel.id, measuredLabel, channel.unit, channel.color)];
+    if (isPwv && pwvVisibility.surface) curves.push(makeHoverCurve(displayedData, channel.id, measuredLabel, channel.unit, channel.color));
+    if (isPwv && pwvVisibility.historical) curves.push(makeHoverCurve(displayedData, "model_history_site_pwv_proxy", `${translate(language, "modelPwvLabel")} · ${translate(language, "historicalModel")}`, channel.unit, "#68b9ff"));
+    if (isPwv && pwvVisibility.instantaneous) curves.push(makeHoverCurve(displayedData, "model_instantaneous_site_pwv_proxy", `${translate(language, "modelPwvLabel")} · ${translate(language, "instantaneousModel")}`, channel.unit, "#f6c85f"));
+    if (showForecast && forecastFields[channel.id]) {
+      curves.push(makeHoverCurve(displayedData, `forecast_${channel.id}`, isPwv ? `${translate(language, "modelPwvLabel")} · ${translate(language, "forecast")}` : `${channelName(channel, language)} · ${translate(language, "forecast")}`, channel.unit, isPwv ? PWV_FORECAST_COLOR : channel.color));
+    }
     return curves;
-  }), [chartChannels, displayStatistic, displayedData, language, selectedIds, showForecast]);
+  }), [chartChannels, displayStatistic, displayedData, language, selectedIds, showForecast, pwvVisibility]);
 
   async function loadDetailedWindow(startMs: number, endMs: number, resolution = averaging) {
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return;
@@ -2291,16 +2399,38 @@ function CompactWeatherChart({
     resetDataZoom();
   }
 
+  function togglePwvSeries(series: keyof typeof pwvVisibility) {
+    setPwvVisibility((current) => ({ ...current, [series]: !current[series] }));
+    resetDataZoom();
+  }
+
+
   return (
     <article className={`weather-chart panel${channels.every((channel) => !channel.id.includes("wind")) ? " weather-chart-wide" : ""}`}>
       <div className="weather-chart-title">
-        <div><h3>{channels.map((channel) => channel.label.replace(/^Site /, "")).join(" / ")}</h3><small>{channels.map((channel) => channel.sourceName).join(" · ")}</small></div>
+        <div><h3>{channels.map((channel) => channelName(channel, language).replace(/^Site /, "")).join(" / ")}</h3><small>{channels.map((channel) => channel.sourceName).join(" · ")}</small></div>
         <div className="weather-chart-actions">
           <strong>{weatherValue(channels[0])}</strong>
         </div>
       </div>
       <div className="channel-selector weather-channel-selector" aria-label={translate(language, "visibleChannels")}>
-        {channels.map((channel) => {
+        {isPwvChart ? <>
+          <button type="button" className={`channel-chip ${pwvVisibility.surface ? "selected" : ""}`} onClick={() => togglePwvSeries("surface")} aria-pressed={pwvVisibility.surface}>
+            <span className="channel-swatch" style={{ backgroundColor: channels[0].color }} />
+            <span className="channel-chip-copy"><strong>{channelName(channels[0], language)}</strong><small>{translate(language, "pwvSurfaceSource")}</small></span>
+            <StatusDot status={channels[0].status} />
+          </button>
+          <button type="button" className={`channel-chip ${pwvVisibility.historical ? "selected" : ""}`} onClick={() => togglePwvSeries("historical")} aria-pressed={pwvVisibility.historical}>
+            <span className="channel-swatch" style={{ backgroundColor: "#68b9ff" }} />
+            <span className="channel-chip-copy"><strong>{translate(language, "historicalModel")}</strong><small>{translate(language, "pwvHistoricalSource")}</small></span>
+            <StatusDot status={forecast?.modelHistory?.length ? "fresh" : "missing"} />
+          </button>
+          <button type="button" className={`channel-chip ${pwvVisibility.instantaneous ? "selected" : ""}`} onClick={() => togglePwvSeries("instantaneous")} aria-pressed={pwvVisibility.instantaneous}>
+            <span className="channel-swatch" style={{ backgroundColor: "#f6c85f" }} />
+            <span className="channel-chip-copy"><strong>{translate(language, "instantaneousModel")}</strong><small>{translate(language, "pwvInstantaneousSource")}</small></span>
+            <StatusDot status={forecast?.instantaneousPwv?.length ? "fresh" : "missing"} />
+          </button>
+        </> : channels.map((channel) => {
           const selected = selectedIds.includes(channel.id);
           return (
             <button type="button" key={channel.id} className={`channel-chip ${selected ? "selected" : ""}`} onClick={() => toggleChannel(channel.id)} aria-pressed={selected}>
@@ -2311,22 +2441,33 @@ function CompactWeatherChart({
           );
         })}
       </div>
+      {isPwvChart ? <div className="pwv-series-legend">
+        <span><i className="pwv-series-swatch proxy" />{channelName(channels[0], language)}</span>
+        <span><i className="pwv-series-swatch model" />{translate(language, "historicalModel")}</span>
+        <span><i className="pwv-series-swatch instantaneous" />{translate(language, "instantaneousModel")}</span>
+        {showForecast ? <span><i className="pwv-series-swatch forecast" />{translate(language, "forecast")}</span> : null}
+        {!forecast?.modelHistory?.length ? <small>{translate(language, "historicalPwvUnavailable")}</small> : null}
+        {!forecast?.instantaneousPwv?.length ? <small>{translate(language, "instantaneousPwvUnavailable")}</small> : null}
+        {showForecast && !forecast?.points.some((point) => typeof point.pwv === "number" && Number.isFinite(point.pwv)) ? <small>{translate(language, "modelPwvUnavailable")}</small> : null}
+      </div> : null}
       <div className="weather-chart-canvas">
-        {displayedData.length && selectedIds.length ? <ResponsiveContainer width="100%" height="100%"><LineChart data={displayedData} margin={{ top: 8, right: 12, left: 2, bottom: 2 }} onMouseMove={(state) => hoverPointer.set(state.activeCoordinate ?? null)} onMouseLeave={() => hoverPointer.set(null)}>
+        {displayedData.length && hasVisibleSeries ? <ResponsiveContainer width="100%" height="100%"><LineChart data={displayedData} margin={{ top: 8, right: 12, left: 2, bottom: 2 }} onMouseMove={(state) => hoverPointer.set(state.activeCoordinate ?? null)} onMouseLeave={() => hoverPointer.set(null)}>
           <CartesianGrid stroke="rgba(148, 163, 184, 0.1)" vertical={false} />
           <XAxis dataKey="timeMs" type="number" scale="time" domain={activeZoom ? [activeZoom.xMin, activeZoom.xMax] : detailWindow ?? ["dataMin", "dataMax"]} allowDataOverflow={Boolean(activeZoom || detailWindow)} tickFormatter={(value) => formatCompactDate(value, language, visibleSpanMs, timeZone)} stroke="#66758a" tick={{ fill: "#9aa8bb", fontSize: 10 }} minTickGap={38} />
           <YAxis width={55} unit={` ${channels[0]?.unit ?? ""}`} tickFormatter={(value) => formatAxisTick(value, language)} stroke="#66758a" tick={{ fill: "#9aa8bb", fontSize: 10 }} domain={currentYDomain} allowDataOverflow />
           <DayBoundaryLines domain={currentXDomain} timeZone={timeZone} />
           <CryogenicPhaseLines events={events} domain={currentXDomain} language={language} />
           <Tooltip isAnimationActive={false} content={() => null} cursor={<NearestCurveCursor pointerStore={hoverPointer} curves={hoverCurves} xDomain={currentXDomain} yDomain={currentYDomain} language={language} timeZone={timeZone} />} />
-          {channels.map((channel) => selectedIds.includes(channel.id) && showReference && !channel.id.includes("wind") ? <Area key={`band-${channel.id}`} type="monotone" dataKey={`band_${channel.id}`} name={`band_${channel.id}`} stroke="none" fill={channel.color} fillOpacity={0.15} connectNulls isAnimationActive={false} /> : null)}
-          {channels.map((channel) => selectedIds.includes(channel.id) ? <Line key={channel.id} type="monotone" dataKey={channel.id} name={channel.id} stroke={channel.color} strokeWidth={2} dot={false} activeDot={false} connectNulls isAnimationActive={false} /> : null)}
-          {channels.map((channel) => selectedIds.includes(channel.id) && showForecast && forecastFields[channel.id] ? <Line key={`forecast-${channel.id}`} type="monotone" dataKey={`forecast_${channel.id}`} name={`forecast_${channel.id}`} stroke={channel.color} strokeWidth={2} strokeDasharray="8 5" dot={false} activeDot={false} connectNulls isAnimationActive={false} /> : null)}
-          {showForecastHistory ? (forecast?.history ?? []).slice(-24).flatMap((run) => channels.map((channel) => selectedIds.includes(channel.id) && forecastFields[channel.id] ? <Line key={`forecast-history-${channel.id}-${run.generatedAtMs}`} type="monotone" dataKey={`forecast_history_${channel.id}_${run.generatedAtMs}`} name={`forecast_history_${channel.id}_${run.generatedAtMs}`} stroke={channel.color} strokeOpacity={0.24} strokeWidth={1} strokeDasharray="3 4" dot={false} activeDot={false} connectNulls isAnimationActive={false} /> : null)) : null}
+          {channels.map((channel) => selectedIds.includes(channel.id) && pwvVisibility.surface && showReference && !channel.id.includes("wind") ? <Area key={`band-${channel.id}`} type="monotone" dataKey={`band_${channel.id}`} name={`band_${channel.id}`} stroke="none" fill={channel.color} fillOpacity={0.15} connectNulls isAnimationActive={false} /> : null)}
+          {channels.map((channel) => selectedIds.includes(channel.id) && (!isPwvChart || pwvVisibility.surface) ? <Line key={channel.id} type="monotone" dataKey={channel.id} name={channel.id} stroke={channel.color} strokeWidth={2} dot={false} activeDot={false} connectNulls isAnimationActive={false} /> : null)}
+          {isPwvChart && pwvVisibility.historical ? <Line key="model-history-pwv" type="monotone" dataKey="model_history_site_pwv_proxy" name="model_history_site_pwv_proxy" stroke="#68b9ff" strokeWidth={2.2} dot={false} activeDot={false} connectNulls isAnimationActive={false} /> : null}
+          {isPwvChart && pwvVisibility.instantaneous ? <Line key="model-instant-pwv" type="monotone" dataKey="model_instantaneous_site_pwv_proxy" name="model_instantaneous_site_pwv_proxy" stroke="#f6c85f" strokeWidth={2.5} dot={false} activeDot={false} connectNulls isAnimationActive={false} /> : null}
+          {channels.map((channel) => selectedIds.includes(channel.id) && showForecast && forecastFields[channel.id] ? <Line key={`forecast-${channel.id}`} type="monotone" dataKey={`forecast_${channel.id}`} name={`forecast_${channel.id}`} stroke={channel.id === "site_pwv_proxy" ? PWV_FORECAST_COLOR : channel.color} strokeWidth={2.5} strokeDasharray="8 5" dot={false} activeDot={false} connectNulls isAnimationActive={false} /> : null)}
+          {showForecastHistory && !isPwvChart ? (forecast?.history ?? []).slice(-24).flatMap((run) => channels.map((channel) => selectedIds.includes(channel.id) && forecastFields[channel.id] ? <Line key={`forecast-history-${channel.id}-${run.generatedAtMs}`} type="monotone" dataKey={`forecast_history_${channel.id}_${run.generatedAtMs}`} name={`forecast_history_${channel.id}_${run.generatedAtMs}`} stroke={channel.color} strokeOpacity={0.24} strokeWidth={1} strokeDasharray="3 4" dot={false} activeDot={false} connectNulls isAnimationActive={false} /> : null)) : null}
         </LineChart></ResponsiveContainer> : <div className="empty-chart">{translate(language, rangeDetail.loading ? (rangeDetail.stale ? "dynamicRefreshing" : "dynamicLoading") : rangeDetail.failed ? "dynamicUnavailable" : "emptyChart")}</div>}
-        {displayedData.length && selectedIds.length ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { const nextZoom = zoomFromSelection(selection, range, currentXDomain, currentYDomain); setZoom(nextZoom); setYDomainOverride(null); setZoomMode(false); void loadDetailedWindow(nextZoom.xMin, nextZoom.xMax); }} /> : null}
-        {displayedData.length && selectedIds.length ? <YAxisRangeBrush key={`${range}|${selectedIds.join(",")}|${displayStatistic}|${latestGlobalMs}|${zoom?.yMin ?? ""}|${yDomainOverride?.[0] ?? ""}`} domain={currentYDomain} extent={yBrushExtent} onCommit={setYDomainOverride} language={language} /> : null}
-        {displayedData.length && selectedIds.length ? <XAxisRangeBrush domain={currentXDomain} extent={fullXDomain} onCommit={(domain) => { setYDomainOverride(null); void loadDetailedWindow(domain[0], domain[1]); }} language={language} /> : null}
+        {displayedData.length && hasVisibleSeries ? <BoxZoomOverlay enabled={zoomMode} language={language} onZoom={(selection) => { const nextZoom = zoomFromSelection(selection, range, currentXDomain, currentYDomain); setZoom(nextZoom); setYDomainOverride(null); setZoomMode(false); void loadDetailedWindow(nextZoom.xMin, nextZoom.xMax); }} /> : null}
+        {displayedData.length && hasVisibleSeries ? <YAxisRangeBrush key={`${range}|${selectedIds.join(",")}|${displayStatistic}|${latestGlobalMs}|${zoom?.yMin ?? ""}|${yDomainOverride?.[0] ?? ""}`} domain={currentYDomain} extent={yBrushExtent} onCommit={setYDomainOverride} language={language} /> : null}
+        {displayedData.length && hasVisibleSeries ? <XAxisRangeBrush domain={currentXDomain} extent={fullXDomain} onCommit={(domain) => { setYDomainOverride(null); void loadDetailedWindow(domain[0], domain[1]); }} language={language} /> : null}
       </div>
       <div className="weather-plot-controls">
         <div className="chart-controls">
@@ -2576,12 +2717,11 @@ function WeatherPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSn
   const groups = [
     byId(["site_temperature", "inside_temperature"]),
     byId(["site_humidity", "inside_humidity"]),
-    byId(["site_pressure"]),
-    byId(["site_wind_speed"]),
-    byId(["site_wind_direction"]),
   ].filter((channels) => channels.length);
-  const standardGroups = groups.slice(0, 3);
-  const windGroups = groups.slice(3);
+  const standardGroups = groups;
+  const pressureGroup = byId(["site_pressure"]);
+  const windGroups = [byId(["site_wind_speed"]), byId(["site_wind_direction"])].filter((channels) => channels.length);
+  const pwvGroup = byId(["site_pwv_proxy"]);
   const speedChannel = snapshot.channels.find((channel) => channel.id === "site_wind_speed");
   const directionChannel = snapshot.channels.find((channel) => channel.id === "site_wind_direction");
   return (
@@ -2598,6 +2738,17 @@ function WeatherPanel({ snapshot, language, timeZone }: { snapshot: MonitoringSn
       </div>
       <section className="weather-grid">
         {standardGroups.map((channels) => <CompactWeatherChart key={channels.map((channel) => channel.id).join("-")} channels={channels} events={snapshot.events} range={range} latestGlobalMs={snapshot.latestGlobalMs} language={language} timeZone={timeZone} forecast={forecast} showForecast={showForecast} showForecastHistory={showForecastHistory} showReference={showReference} />)}
+        {pwvGroup.length ? <>
+          <div className="forecast-note pwv-explanation">
+            <p>{translate(language, "pwvProxyNote")}</p>
+            <p><strong>{translate(language, "pwvFormulaLabel")}:</strong> <code>eₛ = 6.112 exp(17.67 T/(T + 243.5)); e = (RH/100)eₛ; qₛ = 0.622e/(p − 0.378e); q(z) = qₛ exp(−z/H); PWVproxy ≈ qₛ · ρₛ · H, ρₛ ≈ 100p/(RᵈTₖ)</code></p>
+            <small>{translate(language, "pwvFormulaUnits")}</small>
+            <p className="pwv-source-details"><strong>{translate(language, "modelPwvLabel")}:</strong> {translate(language, "modelPwvSource")}</p>
+            <p className="pwv-source-links"><a href="https://open-meteo.com/en/docs" target="_blank" rel="noreferrer">{translate(language, "pwvSourceLinks")}</a> · <a href="https://open-meteo.com/en/docs/historical-forecast-api" target="_blank" rel="noreferrer">Historical Forecast API</a></p>
+          </div>
+          <CompactWeatherChart key="pwv-proxy-chart" channels={pwvGroup} events={snapshot.events} range={range} latestGlobalMs={snapshot.latestGlobalMs} language={language} timeZone={timeZone} forecast={forecast} showForecast={showForecast} showForecastHistory={showForecastHistory} showReference={showReference} />
+        </> : null}
+        {pressureGroup.length ? <CompactWeatherChart key="site-pressure-chart" channels={pressureGroup} events={snapshot.events} range={range} latestGlobalMs={snapshot.latestGlobalMs} language={language} timeZone={timeZone} forecast={forecast} showForecast={showForecast} showForecastHistory={showForecastHistory} showReference={showReference} /> : null}
         <div className="weather-wind-row">
           {windGroups.map((channels) => <CompactWeatherChart key={channels.map((channel) => channel.id).join("-")} channels={channels} events={snapshot.events} range={range} latestGlobalMs={snapshot.latestGlobalMs} language={language} timeZone={timeZone} forecast={forecast} showForecast={showForecast} showForecastHistory={showForecastHistory} showReference={showReference} />)}
         </div>
