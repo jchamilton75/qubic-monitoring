@@ -2778,15 +2778,16 @@ function WebcamsPanel({ language, timeZone }: { language: Language; timeZone: Di
     window.setTimeout(() => URL.revokeObjectURL(objectUrl), 2_000);
   }
 
-  async function fetchCameraImage(cameraId: number) {
-    const response = await fetch(`/api/webcams?id=${cameraId}`, { cache: "no-store" });
+  async function fetchCameraImage(cameraId: number, fresh = false) {
+    const freshParameter = fresh ? "&fresh=1" : "";
+    const response = await fetch(`/api/webcams?id=${cameraId}${freshParameter}`, { cache: "no-store" });
     if (!response.ok) throw new Error("Camera unavailable");
     return response.blob();
   }
 
   async function captureImage(cameraId: number) {
     try {
-      const blob = await fetchCameraImage(cameraId);
+      const blob = await fetchCameraImage(cameraId, true);
       downloadBlob(blob, `QUBIC-camera-${cameraId}-${new Date().toISOString().replaceAll(":", "-")}.jpg`);
       setCaptureNotice("");
     } catch {
@@ -2839,7 +2840,7 @@ function WebcamsPanel({ language, timeZone }: { language: Language; timeZone: Di
         if (drawing || document.visibilityState !== "visible") return false;
         drawing = true;
         try {
-          const blob = await fetchCameraImage(cameraId);
+          const blob = await fetchCameraImage(cameraId, true);
           const bitmap = await createImageBitmap(blob);
           if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
             canvas.width = bitmap.width;
